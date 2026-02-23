@@ -1,0 +1,30 @@
+/* src/Login.css */
+
+/* Make the whole app centered */
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  background: #ffffff;
+}
+
+.appShell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: center; /* center horizontally */
+  align-items: flex-start;
+  padding: 32px 16px;
+}
+
+.appContainer {
+  width: 100%;
+  max-width: 900px; /* overall app width */
+}
+
+/* optional: make header layout nicer */
+.topBar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}

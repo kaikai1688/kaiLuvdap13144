@@ -365,10 +365,12 @@ export default function App() {
 
               <div className="tf-badges">
                 <span className="tf-badge">Communication</span>
+                <span className="tf-badge">Conflict Handling</span>
+                <span className="tf-badge">Awareness</span>
+                <span className="tf-badge">Supportiveness</span>
                 <span className="tf-badge">Adaptability</span>
-                <span className="tf-badge">Trust</span>
                 <span className="tf-badge">Alignment</span>
-                <span className="tf-badge">Alignment</span>
+                <span className="tf-badge">Trustworthiness</span>
               </div>
             </div>
           </div>

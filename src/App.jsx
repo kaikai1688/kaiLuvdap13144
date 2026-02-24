@@ -1,9 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { auth, googleProvider, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-import { deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
-=======
 import {
   collection,
   doc,
@@ -14,7 +11,6 @@ import {
   setDoc,
   where,
 } from "firebase/firestore";
->>>>>>> main
 
 import AssessmentPage from "./AssessmentPage";
 import HomePage from "./HomePage";
@@ -28,24 +24,12 @@ const PREVIEW_SLIDES = [
   {
     title: "Built for student teams",
     subtitle: "Create projects and get matched by assignment, year and workstyle.",
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-    image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80",
-=======
     image:
       "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80",
->>>>>>> main
   },
   {
     title: "Visual trait insights",
     subtitle: "Review 7-trait radar charts with year filters and confidence level.",
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-    image: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=1200&q=80",
-  },
-  {
-    title: "Student teamwork at scale",
-    subtitle: "Move from profile to matching in a few guided steps.",
-    image: "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80",
-=======
     image:
       "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=1200&q=80",
   },
@@ -54,32 +38,11 @@ const PREVIEW_SLIDES = [
     subtitle: "Prototype Gemini verification flow for face + student ID checks.",
     image:
       "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80",
->>>>>>> main
   },
 ];
 
 function LoginPreview() {
   const [slide, setSlide] = useState(0);
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-  useEffect(() => {
-    const id = setInterval(() => setSlide((prev) => (prev + 1) % PREVIEW_SLIDES.length), 2600);
-    return () => clearInterval(id);
-  }, []);
-
-  return (
-    <div className="tf-preview-card">
-      <div className="tf-preview-image-wrap">
-        {PREVIEW_SLIDES.map((item, idx) => (
-          <img key={item.title} src={item.image} alt={item.title} className={`tf-preview-image ${slide === idx ? "is-active" : ""}`} referrerPolicy="no-referrer" />
-        ))}
-      </div>
-      <div className="tf-preview-caption">
-        <h3>{PREVIEW_SLIDES[slide].title}</h3>
-        <p>{PREVIEW_SLIDES[slide].subtitle}</p>
-      </div>
-      <div className="tf-preview-dots" aria-hidden="true">
-        {PREVIEW_SLIDES.map((_, idx) => <span key={idx} className={slide === idx ? "is-active" : ""} />)}
-=======
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -152,20 +115,10 @@ function LoggedOutView({ onLogin }) {
         </div>
 
         <LoginPreview />
->>>>>>> main
       </div>
     </div>
   );
 }
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-
-export default function App() {
-  const [user, setUser] = useState(null);
-  const [userData, setUserData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [page, setPage] = useState("home");
-  const [msg, setMsg] = useState("");
-=======
 
 function LoggedInView(props) {
   const {
@@ -265,20 +218,10 @@ export default function App() {
   const [userData, setUserData] = useState(null);
   const [messages, setMessages] = useState([]);
   const [gateMsg, setGateMsg] = useState("");
->>>>>>> main
 
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-      setMsg("");
-      if (!nextUser) {
-        setLoading(false);
-        return;
-      }
-
-      setLoading(true);
-=======
       setGateMsg("");
 
       if (!nextUser) {
@@ -288,43 +231,19 @@ export default function App() {
 
       setLoadingProfile(true);
 
->>>>>>> main
       const ref = doc(db, "users", nextUser.uid);
       const snap = await getDoc(ref);
+
       if (!snap.exists()) {
         await setDoc(ref, {
           displayName: nextUser.displayName ?? "",
           email: nextUser.email ?? "",
           photoURL: nextUser.photoURL ?? "",
           createdAt: serverTimestamp(),
+          traits: null,
+          traitCounts: null,
           projectsCompleted: 0,
           assessmentCompleted: false,
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-          traits: {
-            communication: 0,
-            conflictHandling: 0,
-            awareness: 0,
-            supportiveness: 0,
-            adaptability: 0,
-            alignment: 0,
-            trustworthiness: 0,
-          },
-          profile: {
-            fullName: nextUser.displayName ?? "",
-            username: "",
-            university: "",
-            course: "",
-            yearOfStudy: "Year 1",
-            studentIdStatus: "Not submitted",
-          },
-          // cleanup deprecated fields
-          idVerification: deleteField(),
-          traitCounts: deleteField(),
-        }, { merge: true });
-      }
-      setPage("home");
-      setLoading(false);
-=======
           profile: {
             name: nextUser.displayName ?? "",
             university: "",
@@ -337,17 +256,12 @@ export default function App() {
 
       setCurrentPage("home");
       setLoadingProfile(false);
->>>>>>> main
     });
 
     return () => unsub();
   }, []);
 
   useEffect(() => {
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-    if (!user) return;
-    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => setUserData(snap.exists() ? snap.data() : null));
-=======
     if (!user) return undefined;
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
       setUserData(snap.exists() ? snap.data() : null);
@@ -379,17 +293,10 @@ export default function App() {
 
       setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
     });
->>>>>>> main
     return () => unsub();
   }, [user]);
 
   const profileReady = useMemo(() => {
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-    const p = userData?.profile;
-    return Boolean(p?.fullName && p?.username && p?.university && p?.course && p?.yearOfStudy);
-  }, [userData]);
-
-=======
     const profile = userData?.profile;
     return Boolean(profile?.name && profile?.university && profile?.faculty);
   }, [userData]);
@@ -411,7 +318,6 @@ export default function App() {
     setCurrentPage("profile");
   }
 
->>>>>>> main
   async function handleLogin() {
     await signInWithPopup(auth, googleProvider);
   }
@@ -420,22 +326,6 @@ export default function App() {
     await signOut(auth);
   }
 
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-  function openProfile() {
-    setPage("profile");
-    setMsg("");
-  }
-
-  function openProjects() {
-    if (!userData?.assessmentCompleted || !profileReady) {
-      setMsg("Please complete profile details and working style assessment first.");
-      return;
-    }
-    setMsg("");
-    setPage("projects");
-  }
-
-=======
   function handleAssessmentDone() {
     setGateMsg("Assessment completed. Please fill in bio info, then open Profile.");
   }
@@ -489,15 +379,8 @@ export default function App() {
     );
   }
 
-<<<<<<< codex/create-student-profile-with-id-verification-5wv2ps
-  if (loading) {
-    return (
-      <div className="tf-bg"><div className="tf-container"><div className="tf-card tf-loading"><div className="tf-spinner" /><div>Loading...</div></div></div></div>
-    );
-=======
   if (loadingProfile) {
     return <LoadingState />;
->>>>>>> main
   }
 
   return (

@@ -1,17 +1,3 @@
-import { useEffect, useState } from "react";
-import { db } from "./firebase";
-import {
-  addDoc,
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  updateDoc,
-  where,
-} from "firebase/firestore";
 import { useState } from "react";
 import { db } from "./firebase";
 import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from "firebase/firestore";
@@ -26,34 +12,6 @@ const TRAITS = [
   "trustworthiness",
 ];
 
-const PROJECT_TYPES = [
-  "Final Year Project",
-  "School Assignment",
-  "Lab Report",
-  "Case Study & Presentation",
-  "Community Service",
-  "Studio or Creative Project",
-];
-
-function traitDistance(a = {}, b = {}) {
-  return TRAITS.reduce((acc, t) => acc + Math.abs(Number(a[t] ?? 0) - Number(b[t] ?? 0)), 0);
-}
-
-export default function ProjectsPage({ user }) {
-  const [form, setForm] = useState({ projectName: "", projectType: PROJECT_TYPES[0], teamSize: 3, date: "" });
-  const [loadingMatch, setLoadingMatch] = useState(false);
-  const [status, setStatus] = useState("");
-  const [matchedTeam, setMatchedTeam] = useState([]);
-  const [projects, setProjects] = useState([]);
-
-  useEffect(() => {
-    if (!user) return;
-    const q = query(collection(db, "projects"), where("ownerUid", "==", user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      setProjects(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
-  }, [user]);
 function traitDistance(a = {}, b = {}) {
   const sum = TRAITS.reduce((acc, t) => acc + Math.abs(Number(a[t] ?? 0) - Number(b[t] ?? 0)), 0);
   return sum;
@@ -83,7 +41,6 @@ export default function ProjectsPage({ user }) {
 
     const meSnap = await getDoc(doc(db, "users", user.uid));
     const meData = meSnap.exists() ? meSnap.data() : {};
-    const myYear = meData?.profile?.yearOfStudy || "Year 1";
     const myYear = meData?.profile?.yearOfStudy || "Y1";
     const myTraits = meData?.traits || {};
 
@@ -97,21 +54,6 @@ export default function ProjectsPage({ user }) {
     const candidates = candidatesSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((u) => u.id !== user.uid)
-      .map((u) => ({ ...u, score: traitDistance(myTraits, u.traits) }))
-      .sort((a, b) => a.score - b.score)
-      .slice(0, Math.max(1, Number(form.teamSize) - 1));
-
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    await addDoc(collection(db, "projects"), {
-      ownerUid: user.uid,
-      memberUids: [user.uid, ...candidates.map((c) => c.id)],
-      name: form.projectName.trim(),
-      projectType: form.projectType,
-      dueDate: form.date,
-      teamSize: Number(form.teamSize),
-      requiredYear: myYear,
-      status: "active",
       .map((u) => ({
         ...u,
         score: traitDistance(myTraits, u.traits),
@@ -137,10 +79,6 @@ export default function ProjectsPage({ user }) {
     setStatus(`Team formed with ${candidates.length} teammate(s).`);
   }
 
-  async function markCompleted(id) {
-    await updateDoc(doc(db, "projects", id), { status: "completed", completedAt: serverTimestamp() });
-  }
-
   return (
     <div className="tf-card tf-panel">
       <h2 className="tf-h2">Projects</h2>
@@ -153,9 +91,6 @@ export default function ProjectsPage({ user }) {
         </label>
         <label className="tf-field">
           <span>Project Type</span>
-          <select value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}>
-            {PROJECT_TYPES.map((type) => <option key={type}>{type}</option>)}
-          </select>
           <input value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))} />
         </label>
         <label className="tf-field">
@@ -187,8 +122,6 @@ export default function ProjectsPage({ user }) {
           <div style={{ display: "grid", gap: 10 }}>
             {matchedTeam.map((mate) => (
               <div key={mate.id} className="tf-message-item">
-                <div style={{ fontWeight: 700 }}>{mate.profile?.fullName || mate.displayName || "Student"}</div>
-                <div className="tf-muted tf-small">Year: {mate.profile?.yearOfStudy || "N/A"} · Similarity score: {mate.score}</div>
                 <div style={{ fontWeight: 700 }}>{mate.profile?.name || mate.displayName || "Student"}</div>
                 <div className="tf-muted tf-small">
                   Year: {mate.profile?.yearOfStudy || "N/A"} · Similarity score: {mate.score}
@@ -198,24 +131,6 @@ export default function ProjectsPage({ user }) {
           </div>
         </div>
       )}
-
-      <div style={{ marginTop: 14 }}>
-        <h3>My Projects</h3>
-        <div style={{ display: "grid", gap: 10 }}>
-          {projects.map((p) => (
-            <div key={p.id} className="tf-message-item">
-              <div style={{ fontWeight: 700 }}>{p.name}</div>
-              <div className="tf-muted tf-small">{p.projectType} · {p.status || "active"}</div>
-              {p.status !== "completed" && (
-                <button className="tf-btn" onClick={() => markCompleted(p.id)} style={{ marginTop: 8 }}>
-                  Mark as Completed
-                </button>
-              )}
-            </div>
-          ))}
-          {projects.length === 0 && <p className="tf-muted">No projects yet.</p>}
-        </div>
-      </div>
     </div>
   );
 }

@@ -72,7 +72,7 @@ export default function App() {
         <div className="tf-auth-wrap">
           <div className="tf-card tf-auth-card">
             <div className="tf-logo">🤝</div>
-            <h1 className="tf-h1">Welcome to TeamFit</h1>
+            <h1 className="tf-h1">Find your perfect team</h1>
             <p className="tf-muted">
               Find teammates that fit your working style — faster and better.
             </p>

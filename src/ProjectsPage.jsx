@@ -98,7 +98,7 @@ export default function ProjectsPage({ user }) {
           <input type="number" min="2" max="8" value={form.teamSize} onChange={(e) => setForm((p) => ({ ...p, teamSize: Number(e.target.value) }))} />
         </label>
         <label className="tf-field">
-          <span>Date</span>
+          <span>Due Date</span>
           <input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))} />
         </label>
       </div>

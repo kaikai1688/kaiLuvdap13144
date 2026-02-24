@@ -6,7 +6,7 @@ import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import AssessmentPage from "./AssessmentPage";
 import CreateProjectPage from "./CreateProjectPage";
-import "./Login.css";
+import "./AppShell.css";
 
 export default function App() {
   const [user, setUser] = useState(null);
@@ -68,21 +68,43 @@ export default function App() {
   // Not logged in -> nice login page
   if (!user) {
     return (
-      <div className="login-page">
-        <div className="login-card">
-          <div className="login-logo">🤝</div>
-          <h1>Welcome to TeamFit</h1>
-          <p style={{ color: "#666" }}>
-            Find teammates that fit your working style.
-          </p>
+      <div className="tf-bg">
+        <div className="tf-auth-wrap">
+          <div className="tf-card tf-auth-card">
+            <div className="tf-logo">🤝</div>
+            <h1 className="tf-h1">Welcome to TeamFit</h1>
+            <p className="tf-muted">
+              Find teammates that fit your working style — faster and better.
+            </p>
 
-          <button className="google-btn" onClick={handleLogin}>
-            Continue with Google
-          </button>
+            <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={handleLogin}>
+              <span className="tf-google-dot" aria-hidden="true" />
+              Continue with Google
+            </button>
 
-          <p style={{ marginTop: 14, color: "#888", fontSize: 12 }}>
-            (Hackathon prototype: Google sign-in only)
-          </p>
+            <p className="tf-footnote">
+              Hackathon prototype · Google sign-in only
+            </p>
+          </div>
+
+          <div className="tf-auth-side">
+            <div className="tf-card tf-side-card">
+              <div className="tf-side-title">How it works</div>
+              <ul className="tf-list">
+                <li>Quick assessment (2–3 minutes)</li>
+                <li>Create a project</li>
+                <li>Get matched by working style</li>
+              </ul>
+
+              <div className="tf-badges">
+                <span className="tf-badge">Communication</span>
+                <span className="tf-badge">Adaptability</span>
+                <span className="tf-badge">Trust</span>
+                <span className="tf-badge">Alignment</span>
+                <span className="tf-badge">Alignment</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -90,36 +112,102 @@ export default function App() {
 
   if (loadingProfile) {
     return (
-      <div style={{ padding: 24, fontFamily: "sans-serif" }}>
-        Loading profile...
+      <div className="tf-bg">
+        <div className="tf-container">
+          <div className="tf-card tf-loading">
+            <div className="tf-spinner" aria-hidden="true" />
+            <div>
+              <div className="tf-loading-title">Loading your profile</div>
+              <div className="tf-muted">Setting things up…</div>
+            </div>
+          </div>
+        </div>
       </div>
     );
   }
 
   // Logged in -> enforce flow
   return (
-    <div style={{ padding: 24, fontFamily: "sans-serif" }}>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <div>
-          Signed in as <b>{user.displayName}</b>
-          <div style={{ color: "#666", fontSize: 12 }}>{user.email}</div>
-        </div>
-        <button onClick={handleLogout}>Sign out</button>
+    <div className="tf-bg">
+      <div className="tf-container">
+        <header className="tf-topbar tf-card">
+          <div className="tf-user">
+            <img
+              className="tf-avatar"
+              src={user.photoURL || "https://www.gravatar.com/avatar/?d=mp"}
+              alt="User avatar"
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <div className="tf-user-name">
+                {user.displayName || "Signed in"}
+              </div>
+              <div className="tf-user-email">{user.email}</div>
+            </div>
+          </div>
+
+          <div className="tf-actions">
+            <span className="tf-chip">
+              {stage === "assessment" ? "Step 1 · Assessment" : "Step 2 · Project"}
+            </span>
+            <button className="tf-btn tf-btn-ghost" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main className="tf-card tf-main">
+          {stage === "assessment" ? (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Before you start</div>
+                  <h2 className="tf-h2">Working style assessment</h2>
+                  <p className="tf-muted">
+                    Answer a few questions so we can match you with teammates who fit.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "50%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <AssessmentPage
+                user={user}
+                onDone={() => {
+                  // after save in AssessmentPage, move to project page
+                  setStage("project");
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Next step</div>
+                  <h2 className="tf-h2">Create a project</h2>
+                  <p className="tf-muted">
+                    Tell us what you’re building and we’ll help you find the best teammates.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "100%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <CreateProjectPage user={user} />
+            </>
+          )}
+        </main>
+
+        <footer className="tf-footer">
+          <span className="tf-muted">TeamFit · Prototype</span>
+        </footer>
       </div>
-
-      <hr style={{ margin: "18px 0" }} />
-
-      {stage === "assessment" ? (
-        <AssessmentPage
-          user={user}
-          onDone={() => {
-            // after save in AssessmentPage, move to project page
-            setStage("project");
-          }}
-        />
-      ) : (
-        <CreateProjectPage user={user} />
-      )}
     </div>
   );
 }

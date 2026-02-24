@@ -1,0 +1,286 @@
+/* src/AppShell.css */
+
+:root{
+  --bg0:#0b1020;
+  --bg1:#0f1633;
+  --card: rgba(255,255,255,.06);
+  --card2: rgba(255,255,255,.08);
+  --stroke: rgba(255,255,255,.10);
+  --text: rgba(255,255,255,.92);
+  --muted: rgba(255,255,255,.62);
+  --shadow: 0 12px 40px rgba(0,0,0,.35);
+  --radius: 18px;
+}
+
+*{ box-sizing:border-box; }
+html, body, #root {
+  height: 100%;
+  width: 100%;
+  margin: 0;
+}
+
+#root {
+  max-width: none;
+  padding: 0;
+}
+body{
+  margin:0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  color: var(--text);
+}
+
+.tf-bg{
+  min-height:100%;
+  background:
+    radial-gradient(1100px 600px at 20% 10%, rgba(91,140,255,.25), transparent 60%),
+    radial-gradient(900px 500px at 85% 20%, rgba(255,120,200,.18), transparent 55%),
+    radial-gradient(900px 500px at 55% 90%, rgba(80,255,195,.14), transparent 60%),
+    linear-gradient(180deg, var(--bg0), var(--bg1));
+  padding: 28px 16px;
+}
+
+.tf-container{
+  width: min(980px, 100%);
+  margin: 0 auto;
+}
+
+.tf-card{
+  background: var(--card);
+  border: 1px solid var(--stroke);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+}
+
+.tf-h1{
+  margin: 10px 0 6px;
+  font-size: 30px;
+  letter-spacing: -.02em;
+}
+.tf-h2{
+  margin: 0;
+  font-size: 22px;
+  letter-spacing: -.02em;
+}
+.tf-kicker{
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: .10em;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+.tf-muted{ color: var(--muted); }
+.tf-footnote{
+  margin-top: 14px;
+  font-size: 12px;
+  color: rgba(255,255,255,.55);
+}
+
+.tf-btn{
+  border: 1px solid var(--stroke);
+  background: rgba(255,255,255,.06);
+  color: var(--text);
+  padding: 10px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: transform .08s ease, background .15s ease, border-color .15s ease;
+}
+.tf-btn:hover{
+  background: rgba(255,255,255,.10);
+  border-color: rgba(255,255,255,.18);
+}
+.tf-btn:active{ transform: translateY(1px); }
+.tf-btn-lg{ padding: 12px 14px; font-weight: 600; }
+
+.tf-btn-primary{
+  border-color: rgba(91,140,255,.55);
+  background: linear-gradient(135deg, rgba(91,140,255,.85), rgba(255,120,200,.55));
+}
+.tf-btn-primary:hover{
+  background: linear-gradient(135deg, rgba(91,140,255,.92), rgba(255,120,200,.62));
+  border-color: rgba(255,255,255,.22);
+}
+
+.tf-btn-ghost{
+  background: transparent;
+}
+
+.tf-google-dot{
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  display: inline-block;
+  margin-right: 10px;
+  background: conic-gradient(from 90deg, #ea4335, #fbbc05, #34a853, #4285f4, #ea4335);
+  box-shadow: 0 0 0 3px rgba(255,255,255,.08);
+}
+
+.tf-auth-wrap{
+  width: min(980px, 100%);
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: 1.2fr .9fr;
+  gap: 16px;
+  align-items: stretch;
+}
+@media (max-width: 880px){
+  .tf-auth-wrap{ grid-template-columns: 1fr; }
+  .tf-auth-side{ display:none; }
+}
+
+.tf-auth-card{
+  padding: 26px;
+  text-align: left;
+}
+.tf-logo{
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+  display: grid;
+  place-items: center;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+.tf-side-card{
+  padding: 22px;
+}
+.tf-side-title{
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+.tf-list{
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.tf-badges{
+  margin-top: 14px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tf-badge{
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  color: rgba(255,255,255,.80);
+}
+
+.tf-topbar{
+  padding: 14px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.tf-user{
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.tf-avatar{
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,.18);
+  object-fit: cover;
+}
+.tf-user-name{
+  font-weight: 700;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+.tf-user-email{
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 380px;
+}
+
+.tf-actions{
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.tf-chip{
+  font-size: 12px;
+  color: rgba(255,255,255,.78);
+  border: 1px solid rgba(255,255,255,.14);
+  background: rgba(255,255,255,.05);
+  padding: 6px 10px;
+  border-radius: 999px;
+}
+
+.tf-main{
+  margin-top: 14px;
+  padding: 18px;
+}
+
+.tf-main-head{
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 14px;
+}
+@media (max-width: 640px){
+  .tf-main-head{ flex-direction: column; }
+}
+
+.tf-progress{
+  width: 220px;
+  height: 10px;
+  border-radius: 999px;
+  background: rgba(255,255,255,.08);
+  border: 1px solid rgba(255,255,255,.10);
+  overflow: hidden;
+}
+.tf-progress-bar{
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(91,140,255,.95), rgba(80,255,195,.75));
+}
+
+.tf-divider{
+  height: 1px;
+  background: rgba(255,255,255,.10);
+  margin: 16px 0;
+}
+
+.tf-loading{
+  padding: 18px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: min(520px, 100%);
+  margin: 0 auto;
+}
+.tf-spinner{
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: 2px solid rgba(255,255,255,.25);
+  border-top-color: rgba(255,255,255,.80);
+  animation: tfspin 1s linear infinite;
+}
+@keyframes tfspin { to { transform: rotate(360deg);} }
+
+.tf-loading-title{
+  font-weight: 700;
+  margin-bottom: 2px;
+}
+
+.tf-footer{
+  margin-top: 12px;
+  padding: 8px 2px;
+  text-align: center;
+}

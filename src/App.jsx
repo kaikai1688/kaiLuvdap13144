@@ -5,7 +5,7 @@ import { signInWithPopup, signOut, onAuthStateChanged } from "firebase/auth";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 import AssessmentPage from "./AssessmentPage";
-import CreateProjectPage from "./CreateProjectPage";
+import ProfilePage from "./ProfilePage";
 import "./AppShell.css";
 
 export default function App() {
@@ -92,7 +92,7 @@ export default function App() {
               <div className="tf-side-title">How it works</div>
               <ul className="tf-list">
                 <li>Quick assessment (2–3 minutes)</li>
-                <li>Create a project</li>
+                <li>Create your profile</li>
                 <li>Get matched by working style</li>
               </ul>
 
@@ -148,7 +148,7 @@ export default function App() {
 
           <div className="tf-actions">
             <span className="tf-chip">
-              {stage === "assessment" ? "Step 1 · Assessment" : "Step 2 · Project"}
+              {stage === "assessment" ? "Step 1 · Assessment" : "Step 2 · Profile"}
             </span>
             <button className="tf-btn tf-btn-ghost" onClick={handleLogout}>
               Sign out
@@ -187,9 +187,9 @@ export default function App() {
               <div className="tf-main-head">
                 <div>
                   <div className="tf-kicker">Next step</div>
-                  <h2 className="tf-h2">Create a project</h2>
+                  <h2 className="tf-h2">Create your profile</h2>
                   <p className="tf-muted">
-                    Tell us what you’re building and we’ll help you find the best teammates.
+                    Set up your student details, review your trait radar, and verify your student ID.
                   </p>
                 </div>
                 <div className="tf-progress" aria-hidden="true">
@@ -199,7 +199,7 @@ export default function App() {
 
               <div className="tf-divider" />
 
-              <CreateProjectPage user={user} />
+              <ProfilePage user={user} />
             </>
           )}
         </main>

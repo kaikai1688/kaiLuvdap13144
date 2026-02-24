@@ -205,6 +205,10 @@ export default function App() {
             <div className="tf-logo">🤝</div>
             <h1 className="tf-h1">Build Full-Stack Web & Mobile Apps in minutes</h1>
             <p className="tf-muted">Continue with Google to start TeamFit matching.</p>
+            <h1 className="tf-h1">Find your perfect team</h1>
+            <p className="tf-muted">
+              Match with teammates who complement your workstyle. From FYP to creative projects — build your dream team effortlessly.
+            </p>
 
             <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={handleLogin}>
               <span className="tf-google-dot" aria-hidden="true" />
@@ -217,6 +221,24 @@ export default function App() {
           </div>
 
           <LoginPreview />
+          <div className="tf-auth-side">
+            <div className="tf-card tf-side-card">
+              <div className="tf-side-title">How it works</div>
+              <ul className="tf-list">
+                <li>Quick assessment (2–3 minutes)</li>
+                <li>Create your profile</li>
+                <li>Get matched by working style</li>
+              </ul>
+
+              <div className="tf-badges">
+                <span className="tf-badge">Communication</span>
+                <span className="tf-badge">Adaptability</span>
+                <span className="tf-badge">Trust</span>
+                <span className="tf-badge">Alignment</span>
+                <span className="tf-badge">Alignment</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -281,6 +303,18 @@ export default function App() {
               alt="User avatar"
               referrerPolicy="no-referrer"
             />
+            <div>
+              <div className="tf-user-name">
+                {user.displayName || "Signed in"}
+              </div>
+              <div className="tf-user-email">{user.email}</div>
+            </div>
+          </div>
+
+          <div className="tf-actions">
+            <span className="tf-chip">
+              {stage === "assessment" ? "Step 1 · Assessment" : "Step 2 · Profile"}
+            </span>
             <button className="tf-btn tf-btn-ghost" onClick={handleLogout}>
               Sign out
             </button>
@@ -299,6 +333,51 @@ export default function App() {
               onGoProjects={() => setCurrentPage("projects")}
               onGoProfile={goProfile}
             />
+        <main className="tf-card tf-main">
+          {stage === "assessment" ? (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Before you start</div>
+                  <h2 className="tf-h2">Working style assessment</h2>
+                  <p className="tf-muted">
+                    Answer a few questions so we can match you with teammates who fit.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "50%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <AssessmentPage
+                user={user}
+                onDone={() => {
+                  // after save in AssessmentPage, move to project page
+                  setStage("project");
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Next step</div>
+                  <h2 className="tf-h2">Create your profile</h2>
+                  <p className="tf-muted">
+                    Set up your student details, review your trait radar, and verify your student ID.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "100%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <ProfilePage user={user} />
+            </>
           )}
           {currentPage === "projects" && <ProjectsPage user={user} />}
           {currentPage === "messages" && <MessagesPage messages={messages} />}

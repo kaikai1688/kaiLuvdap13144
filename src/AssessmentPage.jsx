@@ -1,7 +1,16 @@
-// src/AssessmentPage.jsx
 import { useState } from "react";
 import { db } from "./firebase";
 import { doc, serverTimestamp, setDoc } from "firebase/firestore";
+
+const QUESTIONS = [
+  ["communication", "I communicate clearly with teammates during tasks."],
+  ["conflictHandling", "I handle disagreements calmly and constructively."],
+  ["awareness", "I stay aware of team progress and blockers."],
+  ["supportiveness", "I support teammates when they need help."],
+  ["adaptability", "I adapt quickly when project plans change."],
+  ["alignment", "I align my work with shared goals and timelines."],
+  ["trustworthiness", "I am reliable with commitments and deadlines."],
+];
 
 export default function AssessmentPage({ user, onDone }) {
   const [traits, setTraits] = useState({
@@ -13,68 +22,59 @@ export default function AssessmentPage({ user, onDone }) {
     alignment: 3,
     trustworthiness: 3,
   });
-
   const [status, setStatus] = useState("");
 
   async function saveAssessment() {
     if (!user) return;
+    setStatus("Saving assessment...");
 
-    setStatus("Saving...");
-
-    const ref = doc(db, "users", user.uid);
     await setDoc(
-      ref,
+      doc(db, "users", user.uid),
       {
         traits,
-        traitsUpdatedAt: serverTimestamp(),
         assessmentCompleted: true,
+        traitsUpdatedAt: serverTimestamp(),
       },
       { merge: true }
     );
 
-    setStatus("Saved ✅");
-
-    // Move to next page (App.jsx will control this later)
+    setStatus("Assessment saved ✅");
     onDone?.();
   }
 
-  const questions = [
-    ["communication", "When I’m stuck, I ask a question instead of staying silent."],
-    ["conflictHandling", "When there’s disagreement, I try to understand what others care about before responding."],
-    ["awareness", "I keep track of progress and notice early if we’re falling behind."],
-    ["supportiveness", "If a teammate is overloaded, I’m willing to help or back them up."],
-    ["adaptability", "When plans change, I adjust quickly instead of resisting."],
-    ["alignment", "Before starting work, I make sure everyone agrees on goals and roles."],
-    ["trustworthiness", "If I commit to a task, I deliver it on time (or tell the team early if I can’t)."],
-  ];
-
   return (
-    <div style={{ maxWidth: 800 }}>
-      <h2>Working Style Assessment (1–5)</h2>
-      <p style={{ color: "#666" }}>
-        1 = strongly disagree · 3 = neutral · 5 = strongly agree
-      </p>
+    <div className="tf-card tf-panel">
+      <h2 className="tf-h2">Working Style Assessment</h2>
+      <p className="tf-muted">Likert scale: 1 (lowest) to 5 (highest).</p>
 
-      {questions.map(([key, q]) => (
-        <div key={key} style={{ marginBottom: 14 }}>
-          <label>
-            {q}{" "}
-            <input
-              type="range"
-              min="1"
-              max="5"
-              value={traits[key]}
-              onChange={(e) =>
-                setTraits((prev) => ({ ...prev, [key]: Number(e.target.value) }))
-              }
-            />{" "}
-            <b>{traits[key]}</b>
-          </label>
-        </div>
-      ))}
+      <div style={{ display: "grid", gap: 14 }}>
+        {QUESTIONS.map(([key, q]) => (
+          <div key={key} className="tf-likert-row">
+            <div className="tf-likert-question">{q}</div>
+            <div className="tf-likert-options">
+              {[1, 2, 3, 4, 5].map((score) => {
+                const active = traits[key] === score;
+                return (
+                  <button
+                    key={score}
+                    type="button"
+                    className={`tf-likert-dot ${active ? "is-active" : ""}`}
+                    onClick={() => setTraits((prev) => ({ ...prev, [key]: score }))}
+                    aria-label={`${key} score ${score}`}
+                  >
+                    {score}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
 
-      <button onClick={saveAssessment}>Save & Continue</button>
-      {status && <p style={{ marginTop: 10 }}>{status}</p>}
+      <button className="tf-btn tf-btn-primary" onClick={saveAssessment} style={{ marginTop: 14 }}>
+        Submit Assessment
+      </button>
+      {status && <p>{status}</p>}
     </div>
   );
 }

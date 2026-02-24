@@ -74,7 +74,7 @@ export default function App() {
             <div className="tf-logo">🤝</div>
             <h1 className="tf-h1">Find your perfect team</h1>
             <p className="tf-muted">
-              Find teammates that fit your working style — faster and better.
+              Match with teammates who complement your workstyle. From FYP to creative projects — build your dream team effortlessly.
             </p>
 
             <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={handleLogin}>

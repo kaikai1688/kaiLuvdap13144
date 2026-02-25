@@ -12,6 +12,9 @@ import {
   updateDoc,
   where,
 } from "firebase/firestore";
+import { useState } from "react";
+import { db } from "./firebase";
+import { addDoc, collection, doc, getDoc, getDocs, query, serverTimestamp, where } from "firebase/firestore";
 
 const TRAITS = [
   "communication",
@@ -51,6 +54,21 @@ export default function ProjectsPage({ user }) {
     });
     return () => unsub();
   }, [user]);
+function traitDistance(a = {}, b = {}) {
+  const sum = TRAITS.reduce((acc, t) => acc + Math.abs(Number(a[t] ?? 0) - Number(b[t] ?? 0)), 0);
+  return sum;
+}
+
+export default function ProjectsPage({ user }) {
+  const [form, setForm] = useState({
+    projectName: "",
+    projectType: "",
+    teamSize: 3,
+    date: "",
+  });
+  const [loadingMatch, setLoadingMatch] = useState(false);
+  const [status, setStatus] = useState("");
+  const [matchedTeam, setMatchedTeam] = useState([]);
 
   async function handlePairing() {
     if (!user) return;
@@ -66,6 +84,7 @@ export default function ProjectsPage({ user }) {
     const meSnap = await getDoc(doc(db, "users", user.uid));
     const meData = meSnap.exists() ? meSnap.data() : {};
     const myYear = meData?.profile?.yearOfStudy || "Year 1";
+    const myYear = meData?.profile?.yearOfStudy || "Y1";
     const myTraits = meData?.traits || {};
 
     const candidatesQuery = query(
@@ -93,6 +112,23 @@ export default function ProjectsPage({ user }) {
       teamSize: Number(form.teamSize),
       requiredYear: myYear,
       status: "active",
+      .map((u) => ({
+        ...u,
+        score: traitDistance(myTraits, u.traits),
+      }))
+      .sort((a, b) => a.score - b.score)
+      .slice(0, Math.max(1, Number(form.teamSize) - 1));
+
+    await new Promise((resolve) => setTimeout(resolve, 1800));
+
+    await addDoc(collection(db, "projects"), {
+      ownerUid: user.uid,
+      name: form.projectName.trim(),
+      projectType: form.projectType.trim(),
+      dueDate: form.date,
+      teamSize: Number(form.teamSize),
+      requiredYear: myYear,
+      matchedUids: candidates.map((c) => c.id),
       createdAt: serverTimestamp(),
     });
 
@@ -120,6 +156,7 @@ export default function ProjectsPage({ user }) {
           <select value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}>
             {PROJECT_TYPES.map((type) => <option key={type}>{type}</option>)}
           </select>
+          <input value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))} />
         </label>
         <label className="tf-field">
           <span>Team Size (Pax)</span>
@@ -127,6 +164,7 @@ export default function ProjectsPage({ user }) {
         </label>
         <label className="tf-field">
           <span>Date</span>
+          <span>Due Date</span>
           <input type="date" value={form.date} onChange={(e) => setForm((p) => ({ ...p, date: e.target.value }))} />
         </label>
       </div>
@@ -152,6 +190,10 @@ export default function ProjectsPage({ user }) {
               <div key={mate.id} className="tf-message-item">
                 <div style={{ fontWeight: 700 }}>{mate.profile?.fullName || mate.displayName || "Student"}</div>
                 <div className="tf-muted tf-small">Year: {mate.profile?.yearOfStudy || "N/A"} · Similarity score: {mate.score}</div>
+                <div style={{ fontWeight: 700 }}>{mate.profile?.name || mate.displayName || "Student"}</div>
+                <div className="tf-muted tf-small">
+                  Year: {mate.profile?.yearOfStudy || "N/A"} · Similarity score: {mate.score}
+                </div>
               </div>
             ))}
           </div>

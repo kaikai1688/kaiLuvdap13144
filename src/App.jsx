@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { auth, googleProvider, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
+import { deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 import {
   collection,
   doc,
@@ -23,12 +24,19 @@ const PREVIEW_SLIDES = [
   {
     title: "Built for student teams",
     subtitle: "Create projects and get matched by assignment, year and workstyle.",
+    image: "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80",
     image:
       "https://images.unsplash.com/photo-1522202176988-66273c2fd55f?auto=format&fit=crop&w=1200&q=80",
   },
   {
     title: "Visual trait insights",
     subtitle: "Review 7-trait radar charts with year filters and confidence level.",
+    image: "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=1200&q=80",
+  },
+  {
+    title: "Student teamwork at scale",
+    subtitle: "Move from profile to matching in a few guided steps.",
+    image: "https://images.unsplash.com/photo-1552664730-d307ca884978?auto=format&fit=crop&w=1200&q=80",
     image:
       "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=1200&q=80",
   },
@@ -42,6 +50,24 @@ const PREVIEW_SLIDES = [
 
 function LoginPreview() {
   const [slide, setSlide] = useState(0);
+  useEffect(() => {
+    const id = setInterval(() => setSlide((prev) => (prev + 1) % PREVIEW_SLIDES.length), 2600);
+    return () => clearInterval(id);
+  }, []);
+
+  return (
+    <div className="tf-preview-card">
+      <div className="tf-preview-image-wrap">
+        {PREVIEW_SLIDES.map((item, idx) => (
+          <img key={item.title} src={item.image} alt={item.title} className={`tf-preview-image ${slide === idx ? "is-active" : ""}`} referrerPolicy="no-referrer" />
+        ))}
+      </div>
+      <div className="tf-preview-caption">
+        <h3>{PREVIEW_SLIDES[slide].title}</h3>
+        <p>{PREVIEW_SLIDES[slide].subtitle}</p>
+      </div>
+      <div className="tf-preview-dots" aria-hidden="true">
+        {PREVIEW_SLIDES.map((_, idx) => <span key={idx} className={slide === idx ? "is-active" : ""} />)}
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -118,6 +144,13 @@ function LoggedOutView({ onLogin }) {
     </div>
   );
 }
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [userData, setUserData] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState("home");
+  const [msg, setMsg] = useState("");
 
 function LoggedInView(props) {
   const {
@@ -221,6 +254,13 @@ export default function App() {
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
+      setMsg("");
+      if (!nextUser) {
+        setLoading(false);
+        return;
+      }
+
+      setLoading(true);
       setGateMsg("");
 
       if (!nextUser) {
@@ -232,17 +272,39 @@ export default function App() {
 
       const ref = doc(db, "users", nextUser.uid);
       const snap = await getDoc(ref);
-
       if (!snap.exists()) {
         await setDoc(ref, {
           displayName: nextUser.displayName ?? "",
           email: nextUser.email ?? "",
           photoURL: nextUser.photoURL ?? "",
           createdAt: serverTimestamp(),
-          traits: null,
-          traitCounts: null,
           projectsCompleted: 0,
           assessmentCompleted: false,
+          traits: {
+            communication: 0,
+            conflictHandling: 0,
+            awareness: 0,
+            supportiveness: 0,
+            adaptability: 0,
+            alignment: 0,
+            trustworthiness: 0,
+          },
+          profile: {
+            fullName: nextUser.displayName ?? "",
+            username: "",
+            usernameLower: "",
+            university: "",
+            course: "",
+            yearOfStudy: "Year 1",
+            studentIdStatus: "Not submitted",
+          },
+          // cleanup deprecated fields
+          idVerification: deleteField(),
+          traitCounts: deleteField(),
+        }, { merge: true });
+      }
+      setPage("home");
+      setLoading(false);
           profile: {
             name: nextUser.displayName ?? "",
             university: "",
@@ -261,6 +323,8 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    if (!user) return;
+    const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => setUserData(snap.exists() ? snap.data() : null));
     if (!user) return undefined;
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
       setUserData(snap.exists() ? snap.data() : null);
@@ -296,6 +360,10 @@ export default function App() {
   }, [user]);
 
   const profileReady = useMemo(() => {
+    const p = userData?.profile;
+    return Boolean(p?.fullName && p?.username && p?.university && p?.course && p?.yearOfStudy);
+  }, [userData]);
+
     const profile = userData?.profile;
     return Boolean(profile?.name && profile?.university && profile?.faculty);
   }, [userData]);
@@ -325,14 +393,77 @@ export default function App() {
     await signOut(auth);
   }
 
+  function openProfile() {
+    setPage("profile");
+    setMsg("");
+  }
+
+  function openProjects() {
+    if (!userData?.assessmentCompleted || !profileReady) {
+      setMsg("Please complete profile details and working style assessment first.");
+      return;
+    }
+    setMsg("");
+    setPage("projects");
+  }
+
   function handleAssessmentDone() {
     setGateMsg("Assessment completed. Please fill in bio info, then open Profile.");
   }
 
   if (!user) {
     return <LoggedOutView onLogin={handleLogin} />;
+  // Not logged in -> nice login page
+  if (!user) {
+    return (
+      <div className="tf-bg">
+        <div className="tf-auth-wrap">
+          <div className="tf-card tf-auth-card">
+            <div className="tf-logo">🤝</div>
+            <h1 className="tf-h1">Find your perfect team</h1>
+            <p className="tf-muted">
+              Match with teammates who complement your workstyle. From FYP to creative projects — build your dream team effortlessly.
+            </p>
+
+            <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={handleLogin}>
+              <span className="tf-google-dot" aria-hidden="true" />
+              Continue with Google
+            </button>
+
+            <p className="tf-footnote">
+              Hackathon prototype · Google sign-in only
+            </p>
+          </div>
+
+          <div className="tf-auth-side">
+            <div className="tf-card tf-side-card">
+              <div className="tf-side-title">How it works</div>
+              <ul className="tf-list">
+                <li>Quick assessment (2–3 minutes)</li>
+                <li>Create your profile</li>
+                <li>Get matched by working style</li>
+              </ul>
+
+              <div className="tf-badges">
+                <span className="tf-badge">Communication</span>
+                <span className="tf-badge">Conflict Handling</span>
+                <span className="tf-badge">Awareness</span>
+                <span className="tf-badge">Supportiveness</span>
+                <span className="tf-badge">Adaptability</span>
+                <span className="tf-badge">Alignment</span>
+                <span className="tf-badge">Trustworthiness</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
+  if (loading) {
+    return (
+      <div className="tf-bg"><div className="tf-container"><div className="tf-card tf-loading"><div className="tf-spinner" /><div>Loading...</div></div></div></div>
+    );
   if (loadingProfile) {
     return <LoadingState />;
   }
@@ -349,5 +480,86 @@ export default function App() {
       onLogout={handleLogout}
       onAssessmentDone={handleAssessmentDone}
     />
+    <div className="tf-bg">
+      <div className="tf-container">
+        <header className="tf-topbar tf-card">
+          <div className="tf-user">
+            <img
+              className="tf-avatar"
+              src={user.photoURL || "https://www.gravatar.com/avatar/?d=mp"}
+              alt="User avatar"
+              referrerPolicy="no-referrer"
+            />
+            <div>
+              <div className="tf-user-name">
+                {user.displayName || "Signed in"}
+              </div>
+              <div className="tf-user-email">{user.email}</div>
+            </div>
+          </div>
+
+          <div className="tf-actions">
+            <span className="tf-chip">
+              {stage === "assessment" ? "Step 1 · Assessment" : "Step 2 · Profile"}
+            </span>
+            <button className="tf-btn tf-btn-ghost" onClick={handleLogout}>
+              Sign out
+            </button>
+          </div>
+        </header>
+
+        <main className="tf-card tf-main">
+          {stage === "assessment" ? (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Before you start</div>
+                  <h2 className="tf-h2">Working style assessment</h2>
+                  <p className="tf-muted">
+                    Answer a few questions so we can match you with teammates who fit.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "50%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <AssessmentPage
+                user={user}
+                onDone={() => {
+                  // after save in AssessmentPage, move to project page
+                  setStage("project");
+                }}
+              />
+            </>
+          ) : (
+            <>
+              <div className="tf-main-head">
+                <div>
+                  <div className="tf-kicker">Next step</div>
+                  <h2 className="tf-h2">Create your profile</h2>
+                  <p className="tf-muted">
+                    Set up your student details, review your trait radar, and verify your student ID.
+                  </p>
+                </div>
+                <div className="tf-progress" aria-hidden="true">
+                  <div className="tf-progress-bar" style={{ width: "100%" }} />
+                </div>
+              </div>
+
+              <div className="tf-divider" />
+
+              <ProfilePage user={user} />
+            </>
+          )}
+        </main>
+
+        <footer className="tf-footer">
+          <span className="tf-muted">TeamFit · Prototype</span>
+        </footer>
+      </div>
+    </div>
   );
 }

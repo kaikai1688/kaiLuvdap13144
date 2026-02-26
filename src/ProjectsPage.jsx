@@ -1,6 +1,6 @@
 // src/ProjectsPage.jsx
-import { GoogleGenAI } from "@google/genai";
 import { useEffect, useMemo, useState } from "react";
+import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebase";
 import {
   addDoc,
@@ -36,21 +36,17 @@ const PROJECT_TYPES = [
   "Studio / Creative",
 ];
 
-// --- Compatibility (Similarity 60% + Quality 40%) ---
 function calcCompatibility(traitsA = {}, traitsB = {}) {
-  // Similarity per trait: 1 - diff/4
   const sims = TRAITS.map((key) => {
     const diff = Math.abs(Number(traitsA[key] ?? 0) - Number(traitsB[key] ?? 0));
     return 1 - diff / 4;
   });
   const baseScore = (sims.reduce((a, b) => a + b, 0) / TRAITS.length) * 100;
 
-  // Quality: avg trait level
   const qualityA = TRAITS.reduce((acc, key) => acc + Number(traitsA[key] ?? 0), 0) / TRAITS.length;
   const qualityB = TRAITS.reduce((acc, key) => acc + Number(traitsB[key] ?? 0), 0) / TRAITS.length;
   const qualityScore = ((qualityA + qualityB) / 2 / 5) * 100;
 
-  // Weighted final
   return Math.round(baseScore * 0.6 + qualityScore * 0.4);
 }
 
@@ -61,52 +57,48 @@ function getWorkstyleLabel(score) {
   return "Developing Teammate";
 }
 
-// --- Term (Option A): short<=7, medium 8-30, long>30 ---
 function computeTermFromDueDate(dueDateStr) {
-  const today = new Date();
-  const due = new Date(dueDateStr);
-  const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+  // dueDateStr is "YYYY-MM-DD"
+  const due = new Date(dueDateStr + "T00:00:00");
+  const now = new Date();
+  const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
   if (diffDays <= 7) return "short";
   if (diffDays <= 30) return "medium";
   return "long";
 }
 
-// Small capped boost (0..5) from topTraits average
-function priorityBoost(candidateTraits = {}, topTraits = []) {
-  if (!topTraits?.length) return 0;
-  const avgTop =
-    topTraits.reduce((acc, t) => acc + Number(candidateTraits?.[t] ?? 0), 0) / topTraits.length;
-  return Math.round((avgTop / 5) * 5); // 0..5 points
+async function withTimeout(promise, ms, label = "Timed out") {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error(label)), ms)),
+  ]);
 }
 
-// --- Gemini: get top 3 traits based on projectType + term (LOCAL ONLY) ---
-async function getGeminiTopTraits({ projectType, term }) {
+async function geminiAdvisorForMatch({ candidateName, projectType, term, myTraits, theirTraits }) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Missing VITE_GEMINI_API_KEY in .env.local");
+  if (!apiKey) {
+    // fallback if you didn’t set env
+    return `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early and communicate often.`;
+  }
 
   const ai = new GoogleGenAI({ apiKey });
 
   const prompt = `
-Pick TOP 3 collaboration traits for the project.
-
+You are an advisor for student team matching.
 Project type: ${projectType}
-Project term: ${term} (short<=7 days, medium=8-30 days, long>30 days)
+Project term: ${term} (short/medium/long)
 
-Traits (choose ONLY from this list):
-communication, conflictHandling, awareness, supportiveness, adaptability, alignment, trustworthiness
+My traits (1..5):
+${TRAITS.map((t) => `${t}: ${Number(myTraits?.[t] ?? 0)}`).join("\n")}
 
-Return STRICT JSON ONLY (no markdown, no extra keys):
-{
-  "topTraits": ["trait1","trait2","trait3"],
-  "rationale": {
-    "trait1": "one sentence reason",
-    "trait2": "one sentence reason",
-    "trait3": "one sentence reason"
-  }
-}
-Rules:
-- topTraits must be exactly 3 distinct items.
-- Use only allowed trait names.
+Candidate traits (1..5):
+${TRAITS.map((t) => `${t}: ${Number(theirTraits?.[t] ?? 0)}`).join("\n")}
+
+Write 3-6 short lines (line breaks) as "Gemini Advisor:".
+- Compliment strong traits.
+- Warn low trait gaps and give 1 practical action.
+- Mention deadline/term relevance.
+Do NOT output markdown, just plain text.
 `;
 
   const resp = await ai.models.generateContent({
@@ -114,87 +106,9 @@ Rules:
     contents: prompt,
   });
 
-  const raw = resp.text.trim();
-  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-  const parsed = JSON.parse(cleaned);
-
-  const allowed = new Set(TRAITS);
-  const top = Array.isArray(parsed.topTraits) ? parsed.topTraits : [];
-  const uniq = [...new Set(top)];
-  if (uniq.length !== 3 || !uniq.every((t) => allowed.has(t))) {
-    throw new Error("Gemini returned invalid topTraits");
-  }
-
-  return {
-    topTraits: uniq,
-    rationale: parsed.rationale || {},
-  };
-}
-
-// --- Gemini: pairing advisor after matching (LOCAL ONLY) ---
-async function getGeminiPairingAdvisor({
-  projectType,
-  term,
-  dueDate,
-  userName,
-  candidateName,
-  userTraits,
-  candidateTraits,
-  topTraits,
-  baseScore,
-  qualityScore,
-  finalScore,
-}) {
-  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Missing VITE_GEMINI_API_KEY in .env.local");
-
-  const ai = new GoogleGenAI({ apiKey });
-
-  const prompt = `
-You are "Gemini Advisor" for a student team matching app.
-Use ONLY the numeric traits given. Don't invent facts.
-
-Project: ${projectType}
-Term: ${term}
-Due date: ${dueDate}
-
-User: ${userName}
-Candidate: ${candidateName}
-
-Top 3 prioritized traits for this project: ${topTraits.join(", ")}
-
-User traits (1-5): ${JSON.stringify(userTraits)}
-Candidate traits (1-5): ${JSON.stringify(candidateTraits)}
-
-Scores:
-baseSimilarityScore (0-100): ${baseScore}
-qualityScore (0-100): ${qualityScore}
-finalCompatibility (0-100): ${finalScore}
-
-Return STRICT JSON ONLY:
-{
-  "workstyleLabel": "creative label (2-4 words)",
-  "summary": "1-2 sentences fit summary",
-  "strengths": ["one strength", "one strength"],
-  "risks": ["one risk"],
-  "actions": ["one concrete action", "one concrete action"]
-}
-
-Rules:
-- Mention at least one strength from candidate's high traits (>=4) or topTraits.
-- Mention one risk if any trait is low (<=2) OR if a topTrait is weak compared to user.
-- Actions must be practical (roles, check-ins, communication plan).
-No markdown.
-`;
-
-  const resp = await ai.models.generateContent({
-    model: "gemini-2.5-flash",
-    contents: prompt,
-  });
-
-  const raw = resp.text.trim();
-  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
-  return JSON.parse(cleaned);
+  // The SDK returns structured output; easiest safe access:
+  const text = resp?.text || resp?.candidates?.[0]?.content?.parts?.[0]?.text || "";
+  return text?.trim() || `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early.`;
 }
 
 export default function ProjectsPage({ user }) {
@@ -207,9 +121,17 @@ export default function ProjectsPage({ user }) {
 
   const [status, setStatus] = useState("");
   const [loadingPairing, setLoadingPairing] = useState(false);
+
   const [myProjects, setMyProjects] = useState([]);
   const [pairedMembers, setPairedMembers] = useState([]);
   const [advisor, setAdvisor] = useState("");
+
+  // ✅ Important: store active project info for Connect requests
+  const [activeProjectId, setActiveProjectId] = useState(null);
+  const [activeProjectName, setActiveProjectName] = useState("");
+
+  // Outgoing requests for THIS active project (User A perspective)
+  const [outgoingForActiveProject, setOutgoingForActiveProject] = useState([]);
 
   useEffect(() => {
     if (!user) return undefined;
@@ -220,17 +142,80 @@ export default function ProjectsPage({ user }) {
     return () => unsub();
   }, [user]);
 
+  // listen outgoing requests for current activeProjectId
+  useEffect(() => {
+    if (!user || !activeProjectId) return;
+    const q = query(
+      collection(db, "connectionRequests"),
+      where("fromUid", "==", user.uid),
+      where("projectId", "==", activeProjectId)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setOutgoingForActiveProject(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+    });
+    return () => unsub();
+  }, [user, activeProjectId]);
+
   const currentProjects = useMemo(
     () => myProjects.filter((p) => (p.status || "current") === "current"),
     [myProjects]
   );
   const completedProjects = useMemo(() => myProjects.filter((p) => p.status === "completed"), [myProjects]);
 
+  const outgoingPending = useMemo(
+    () => outgoingForActiveProject.filter((r) => r.status === "pending"),
+    [outgoingForActiveProject]
+  );
+  const outgoingAccepted = useMemo(
+    () => outgoingForActiveProject.filter((r) => r.status === "accepted"),
+    [outgoingForActiveProject]
+  );
+  const outgoingRejected = useMemo(
+    () => outgoingForActiveProject.filter((r) => r.status === "rejected"),
+    [outgoingForActiveProject]
+  );
+
+  async function sendConnectRequest(candidate, projectId) {
+    if (!user || !projectId) return;
+
+    // prevent duplicate pending request
+    const existingQ = query(
+      collection(db, "connectionRequests"),
+      where("fromUid", "==", user.uid),
+      where("toUid", "==", candidate.id),
+      where("projectId", "==", projectId),
+      where("status", "==", "pending")
+    );
+    const existingSnap = await getDocs(existingQ);
+    if (!existingSnap.empty) {
+      setStatus("You already sent a pending request to this user for this project.");
+      return;
+    }
+
+    await addDoc(collection(db, "connectionRequests"), {
+      projectId,
+      projectName: activeProjectName || form.projectName.trim(),
+      projectType: form.projectType,
+      dueDate: form.dueDate,
+
+      fromUid: user.uid,
+      fromName: user.displayName || "User A",
+      toUid: candidate.id,
+      toName: candidate.profile?.fullName || candidate.profile?.username || "User B",
+
+      status: "pending",
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+
+    setStatus(`Connect request sent to ${candidate.profile?.fullName || candidate.profile?.username || "user"} ✅`);
+  }
+
   async function startPairing() {
     if (!user) return;
 
     if (!form.projectName.trim() || !form.projectType || !form.dueDate || Number(form.teamSize) < 2) {
-      setStatus("Please fill Project Name, Project Type, Team Size (min 2, include), and Due Date.");
+      setStatus("Please fill Project Name, Project Type, Team Size (min 2), and Due Date.");
       return;
     }
 
@@ -239,129 +224,107 @@ export default function ProjectsPage({ user }) {
     setPairedMembers([]);
     setAdvisor("");
 
-    const term = computeTermFromDueDate(form.dueDate);
-
-    // 1) Ask Gemini for top 3 traits (local-only). Fallback to empty if fails.
-    let priority = { topTraits: [], rationale: {} };
     try {
-      priority = await getGeminiTopTraits({ projectType: form.projectType, term });
-      console.log("Gemini topTraits:", priority.topTraits, priority.rationale);
-    } catch (e) {
-      console.warn("Gemini topTraits failed (fallback to none):", e);
-    }
+      const term = computeTermFromDueDate(form.dueDate);
 
-    // 2) Load my traits
-    const myUserSnap = await getDoc(doc(db, "users", user.uid));
-    const myUserData = myUserSnap.exists() ? myUserSnap.data() : {};
-    const myTraits = myUserData?.traits || {};
+      // 1) Load my traits
+      const myUserSnap = await getDoc(doc(db, "users", user.uid));
+      const myUserData = myUserSnap.exists() ? myUserSnap.data() : {};
+      const myTraits = myUserData?.traits || {};
 
-    // 3) Join or create project
-    const existingQ = query(
-      collection(db, "projects"),
-      where("name", "==", form.projectName.trim()),
-      where("projectType", "==", form.projectType),
-      where("status", "==", "current")
-    );
-    const existingSnap = await getDocs(existingQ);
+      // 2) Create or join project (IMPORTANT: do NOT auto-add candidates)
+      const existingQ = query(
+        collection(db, "projects"),
+        where("name", "==", form.projectName.trim()),
+        where("projectType", "==", form.projectType),
+        where("status", "==", "current")
+      );
+      const existingSnap = await getDocs(existingQ);
 
-    let projectId;
-    let existingMembers = [user.uid];
+      let projectId;
+      let existingMembers = [user.uid];
 
-    if (!existingSnap.empty) {
-      const target = existingSnap.docs[0];
-      projectId = target.id;
-      existingMembers = target.data().memberUids || [];
+      if (!existingSnap.empty) {
+        const target = existingSnap.docs[0];
+        projectId = target.id;
+        existingMembers = target.data().memberUids || [];
 
-      await updateDoc(doc(db, "projects", projectId), {
-        memberUids: arrayUnion(user.uid),
-        teamSize: Number(form.teamSize),
-        dueDate: form.dueDate,
-      });
-    } else {
-      const created = await addDoc(collection(db, "projects"), {
-        ownerUid: user.uid,
-        name: form.projectName.trim(),
-        projectType: form.projectType,
-        teamSize: Number(form.teamSize),
-        dueDate: form.dueDate,
-        status: "current",
-        memberUids: [user.uid],
-        createdAt: serverTimestamp(),
-      });
-      projectId = created.id;
-    }
-
-    // 4) Pick best candidates (requires users read rules to allow signed-in reads)
-    const usersSnap = await getDocs(collection(db, "users"));
-    const candidates = usersSnap.docs
-      .map((d) => ({ id: d.id, ...d.data() }))
-      .filter((u) => u.id !== user.uid && !existingMembers.includes(u.id) && u.assessmentCompleted)
-      .map((u) => {
-        const base = calcCompatibility(myTraits, u.traits || {});
-        const qualityA =
-          TRAITS.reduce((acc, key) => acc + Number(myTraits[key] ?? 0), 0) / TRAITS.length;
-        const qualityB =
-          TRAITS.reduce((acc, key) => acc + Number((u.traits || {})[key] ?? 0), 0) / TRAITS.length;
-        const qualityScore = Math.round(((qualityA + qualityB) / 2 / 5) * 100);
-
-        const boost = priorityBoost(u.traits || {}, priority.topTraits);
-        const final = Math.min(100, base + boost);
-
-        return {
-          ...u,
-          compatibility: final,
-          baseScore: base,
-          qualityScore,
-          priorityBoost: boost,
-          workstyleType: getWorkstyleLabel(final), // fallback label
-        };
-      })
-      .sort((a, b) => b.compatibility - a.compatibility)
-      .slice(0, Math.max(0, Number(form.teamSize) - 1));
-
-    if (candidates.length > 0) {
-      await updateDoc(doc(db, "projects", projectId), {
-        memberUids: arrayUnion(...candidates.map((c) => c.id)),
-      });
-
-      // 5) Gemini Advisor for the top candidate (local-only). Fallback to simple advice if fails.
-      const top = candidates[0];
-
-      try {
-        const advice = await getGeminiPairingAdvisor({
-          projectType: form.projectType,
-          term,
+        await updateDoc(doc(db, "projects", projectId), {
+          memberUids: arrayUnion(user.uid),
+          teamSize: Number(form.teamSize),
           dueDate: form.dueDate,
-          userName: myUserData?.profile?.fullName || myUserData?.displayName || "You",
-          candidateName: top.profile?.fullName || "Candidate",
-          userTraits: myTraits,
-          candidateTraits: top.traits || {},
-          topTraits: priority.topTraits,
-          baseScore: top.baseScore,
-          qualityScore: top.qualityScore,
-          finalScore: top.compatibility,
         });
-
-        // apply Gemini label if returned
-        top.workstyleType = advice.workstyleLabel || top.workstyleType;
-
-        setAdvisor(
-          `Gemini Advisor: ${advice.summary}\n\nStrengths: ${advice.strengths?.join("; ")}\nRisk: ${
-            advice.risks?.join("; ") || "None"
-          }\nActions: ${advice.actions?.join("; ")}`
-        );
-      } catch (e) {
-        console.warn("Gemini advisor failed (fallback):", e);
-        // fallback text if Gemini fails
-        setAdvisor(
-          `Gemini Advisor: Good match. Prioritize ${priority.topTraits.join(", ") || "clear communication"} and set clear roles early.`
-        );
+      } else {
+        const created = await addDoc(collection(db, "projects"), {
+          ownerUid: user.uid,
+          name: form.projectName.trim(),
+          projectType: form.projectType,
+          teamSize: Number(form.teamSize),
+          dueDate: form.dueDate,
+          status: "current",
+          memberUids: [user.uid], // ✅ only owner at first
+          createdAt: serverTimestamp(),
+        });
+        projectId = created.id;
       }
-    }
 
-    setPairedMembers(candidates);
-    setLoadingPairing(false);
-    setStatus("Pairing successful ✅");
+      // ✅ Save active project info (used by Connect + A Inbox)
+      setActiveProjectId(projectId);
+      setActiveProjectName(form.projectName.trim());
+
+      // 3) Pick best candidates (suggest only)
+      const usersSnap = await getDocs(collection(db, "users"));
+      const candidates = usersSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((u) => u.id !== user.uid && !existingMembers.includes(u.id) && u.assessmentCompleted)
+        .map((u) => {
+          const score = calcCompatibility(myTraits, u.traits || {});
+          return {
+            ...u,
+            compatibility: score,
+            workstyleType: getWorkstyleLabel(score),
+          };
+        })
+        .sort((a, b) => b.compatibility - a.compatibility)
+        .slice(0, Math.max(0, Number(form.teamSize) - 1));
+
+      setPairedMembers(candidates);
+
+      // 4) Gemini advisor AFTER pairing (use top candidate)
+      if (candidates.length > 0) {
+        const top = candidates[0];
+        const candidateName = top.profile?.fullName || top.profile?.username || "candidate";
+
+        try {
+          const aiText = await withTimeout(
+            geminiAdvisorForMatch({
+              candidateName,
+              projectType: form.projectType,
+              term,
+              myTraits,
+              theirTraits: top.traits || {},
+            }),
+            6500,
+            "Gemini advisor timed out"
+          );
+          setAdvisor(aiText);
+        } catch (e) {
+          // fallback
+          setAdvisor(
+            `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early, especially for a ${term}-term project.`
+          );
+        }
+      } else {
+        setAdvisor("Gemini Advisor: No suitable candidates found yet. Try again later.");
+      }
+
+      setStatus("Pairing successful ✅ (Now press Connect to invite)");
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || "Pairing failed. Check console.");
+    } finally {
+      setLoadingPairing(false);
+    }
   }
 
   async function removeTeammate(projectId, teammateUid) {
@@ -412,7 +375,7 @@ export default function ProjectsPage({ user }) {
           </label>
 
           <label className="tf-field">
-            <span>Team Size (Include Yourself)</span>
+            <span>Team Size</span>
             <input
               type="number"
               min="2"
@@ -446,6 +409,7 @@ export default function ProjectsPage({ user }) {
         {status && <p className="tf-muted">{status}</p>}
       </section>
 
+      {/* Pairing suggestions + Connect button */}
       {pairedMembers.length > 0 && (
         <section className="tf-team-grid">
           {pairedMembers.map((m) => (
@@ -457,13 +421,86 @@ export default function ProjectsPage({ user }) {
               </div>
               <div className="tf-badge-row">
                 <span className="tf-mini-chip">{m.workstyleType}</span>
-                <span className="tf-mini-chip">
-                  {m.compatibility}% compatible {m.priorityBoost ? `(+${m.priorityBoost})` : ""}
-                </span>
+                <span className="tf-mini-chip">{m.compatibility}% compatible</span>
+              </div>
+
+              <div className="tf-inline-actions" style={{ marginTop: 10 }}>
+                <button
+                  className="tf-btn tf-btn-primary"
+                  onClick={() => sendConnectRequest(m, activeProjectId)}
+                  disabled={!activeProjectId}
+                >
+                  Connect
+                </button>
               </div>
             </article>
           ))}
+
+          {/* ✅ Gemini Advisor is back */}
           {advisor && <div className="tf-advisor-box">{advisor}</div>}
+        </section>
+      )}
+
+      {/* ✅ REPLACES the unwanted "Invites for this project" page:
+          This is User A "Inbox" for current created project (pending/accepted/rejected). */}
+      {activeProjectId && (
+        <section className="tf-card tf-panel">
+          <h3 className="tf-section-title">
+            Inbox — <b>{activeProjectName || "This project"}</b>
+          </h3>
+          <p className="tf-muted tf-small">
+            Status updates for your connect requests (this stays as history).
+          </p>
+
+          <div style={{ display: "grid", gap: 14 }}>
+            <div>
+              <b>Pending</b>
+              {outgoingPending.length === 0 ? (
+                <p className="tf-muted">No pending invites.</p>
+              ) : (
+                outgoingPending.map((r) => (
+                  <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
+                    <div>
+                      <b>{r.toName || r.toUid}</b>
+                      <div className="tf-muted tf-small">Status: pending</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div>
+              <b>Accepted</b>
+              {outgoingAccepted.length === 0 ? (
+                <p className="tf-muted">No accepted invites yet.</p>
+              ) : (
+                outgoingAccepted.map((r) => (
+                  <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
+                    <div>
+                      <b>{r.toName || r.toUid}</b>
+                      <div className="tf-muted tf-small">Status: accepted ✅</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div>
+              <b>Rejected</b>
+              {outgoingRejected.length === 0 ? (
+                <p className="tf-muted">No rejected invites.</p>
+              ) : (
+                outgoingRejected.map((r) => (
+                  <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
+                    <div>
+                      <b>{r.toName || r.toUid}</b>
+                      <div className="tf-muted tf-small">Status: rejected ❌</div>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
         </section>
       )}
 

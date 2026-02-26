@@ -1,22 +1,25 @@
-import { useEffect, useMemo, useState } from "react";
+// src/App.jsx
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import {
+  Routes,
+  Route,
+  Navigate,
+  Outlet,
+  NavLink,
+  useNavigate,
+  useLocation,
+  useOutletContext,
+} from "react-router-dom";
+
 import { auth, googleProvider, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import {
-  collection,
-  doc,
-  getDoc,
-  onSnapshot,
-  query,
-  serverTimestamp,
-  setDoc,
-  where,
-} from "firebase/firestore";
+import { deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
 
-import AssessmentPage from "./AssessmentPage";
 import HomePage from "./HomePage";
 import MessagesPage from "./MessagesPage";
 import ProfilePage from "./ProfilePage";
 import ProjectsPage from "./ProjectsPage";
+import RequireReady from "./RequireReady";
 import "./AppShell.css";
 
 const PREVIEW_SLIDES = [
@@ -28,7 +31,7 @@ const PREVIEW_SLIDES = [
   },
   {
     title: "Visual trait insights",
-    subtitle: "Review 7-trait radar charts with year filters and confidence level.",
+    subtitle: "Research based: Review 7 traits radar charts and confidence level.",
     image:
       "https://images.unsplash.com/photo-1461749280684-dccba630e2f6?auto=format&fit=crop&w=1200&q=80",
   },
@@ -53,12 +56,12 @@ function LoginPreview() {
   return (
     <div className="tf-preview-card">
       <div className="tf-preview-image-wrap">
-        {PREVIEW_SLIDES.map((item, index) => (
+        {PREVIEW_SLIDES.map((item, idx) => (
           <img
             key={item.title}
             src={item.image}
             alt={item.title}
-            className={`tf-preview-image ${slide === index ? "is-active" : ""}`}
+            className={`tf-preview-image ${slide === idx ? "is-active" : ""}`}
             referrerPolicy="no-referrer"
           />
         ))}
@@ -70,8 +73,8 @@ function LoginPreview() {
       </div>
 
       <div className="tf-preview-dots" aria-hidden="true">
-        {PREVIEW_SLIDES.map((_, index) => (
-          <span key={index} className={slide === index ? "is-active" : ""} />
+        {PREVIEW_SLIDES.map((_, idx) => (
+          <span key={idx} className={slide === idx ? "is-active" : ""} />
         ))}
       </div>
     </div>
@@ -99,18 +102,23 @@ function LoggedOutView({ onLogin }) {
     <div className="tf-bg">
       <div className="tf-auth-wrap tf-auth-wrap-xl">
         <div className="tf-card tf-auth-card">
-          <div className="tf-logo">🤝</div>
-          <h1 className="tf-h1">Build Full-Stack Web & Mobile Apps in minutes</h1>
-          <p className="tf-muted">Continue with Google to start TeamFit matching.</p>
+          <div className="tf-brand-lockup">
+            <div className="tf-logo-mark">T</div>
+            <div className="tf-logo-word">TeamFit</div>
+          </div>
+
+          <h1 className="tf-h1">Find Your Perfect Team</h1>
+          <p className="tf-muted">
+            Match with teammates who complement your workstyle. From FYP to creative projects — build
+            your dream team effortlessly.
+          </p>
 
           <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={onLogin}>
             <span className="tf-google-dot" aria-hidden="true" />
             Continue with Google
           </button>
 
-          <p className="tf-footnote">
-            By continuing, you agree to TeamFit Terms and Privacy Policy.
-          </p>
+          <p className="tf-footnote">By continuing, you agree to TeamFit Terms and Privacy Policy.</p>
         </div>
 
         <LoginPreview />
@@ -119,68 +127,115 @@ function LoggedOutView({ onLogin }) {
   );
 }
 
-function LoggedInView(props) {
-  const {
-    user,
-    userData,
-    currentPage,
-    setCurrentPage,
-    gateMsg,
-    goProfile,
-    messages,
-    onLogout,
-    onAssessmentDone,
-  } = props;
+function ProfileMenu({ user, onGoProfile, onGoMessages, onLogout }) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef(null);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (!wrapRef.current) return;
+      if (!wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onDocClick);
+    return () => document.removeEventListener("mousedown", onDocClick);
+  }, []);
+
+  return (
+    <div className="tf-menu" ref={wrapRef}>
+      <button className="tf-avatar-btn" onClick={() => setOpen((v) => !v)}>
+        <img
+          className="tf-avatar"
+          src={user.photoURL || "https://www.gravatar.com/avatar/?d=mp"}
+          alt="User avatar"
+          referrerPolicy="no-referrer"
+        />
+      </button>
+
+      {open && (
+        <div className="tf-menu-pop">
+          <button
+            className="tf-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onGoProfile();
+            }}
+          >
+            My Profile
+          </button>
+          <button
+            className="tf-menu-item"
+            onClick={() => {
+              setOpen(false);
+              onGoMessages();
+            }}
+          >
+            My Messages
+          </button>
+          <div className="tf-menu-sep" />
+          <button
+            className="tf-menu-item danger"
+            onClick={() => {
+              setOpen(false);
+              onLogout();
+            }}
+          >
+            Sign Out
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Layout renders the top bar + outlet (child routes)
+function LoggedInLayout({ user, userData, profileReady, onLogout }) {
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // show gate message if redirected with state
+  const gateMsg = location.state?.gateMsg || "";
+
+  function goProfile() {
+    navigate("/profile", { replace: false, state: {} });
+  }
+
+  function goMessages() {
+    // Let route guard handle gating; we just navigate
+    navigate("/messages", { replace: false });
+  }
 
   return (
     <div className="tf-bg">
       <div className="tf-container tf-container-wide">
         <header className="tf-topbar tf-card tf-topbar-nav">
-          <div className="tf-brand">
+          <div className="tf-brand" style={{ cursor: "pointer" }} onClick={() => navigate("/home")}>
             <div className="tf-logo">T</div>
             <strong>TeamFit</strong>
           </div>
 
           <nav className="tf-nav-links">
-            <button
-              className={`tf-nav-btn ${currentPage === "home" ? "is-active" : ""}`}
-              onClick={() => setCurrentPage("home")}
+            <NavLink
+              to="/home"
+              className={({ isActive }) => `tf-nav-btn ${isActive ? "is-active" : ""}`}
             >
               Home
-            </button>
-
-            <button
-              className={`tf-nav-btn ${currentPage === "projects" ? "is-active" : ""}`}
-              onClick={() => setCurrentPage("projects")}
+            </NavLink>
+            <NavLink
+              to="/projects"
+              className={({ isActive }) => `tf-nav-btn ${isActive ? "is-active" : ""}`}
             >
               Projects
-            </button>
-
-            <button
-              className={`tf-nav-btn ${currentPage === "messages" ? "is-active" : ""}`}
-              onClick={() => setCurrentPage("messages")}
+            </NavLink>
+            <NavLink
+              to="/messages"
+              className={({ isActive }) => `tf-nav-btn ${isActive ? "is-active" : ""}`}
             >
               Messages
-            </button>
-
-            <button
-              className={`tf-nav-btn ${currentPage === "profile" ? "is-active" : ""}`}
-              onClick={goProfile}
-            >
-              Profile
-            </button>
+            </NavLink>
           </nav>
 
           <div className="tf-actions">
-            <img
-              className="tf-avatar"
-              src={user.photoURL || "https://www.gravatar.com/avatar/?d=mp"}
-              alt="User avatar"
-              referrerPolicy="no-referrer"
-            />
-            <button className="tf-btn tf-btn-ghost" onClick={onLogout}>
-              Sign out
-            </button>
+            <ProfileMenu user={user} onGoProfile={goProfile} onGoMessages={goMessages} onLogout={onLogout} />
           </div>
         </header>
 
@@ -191,45 +246,70 @@ function LoggedInView(props) {
         )}
 
         <main className="tf-main-page">
-          {currentPage === "home" && (
-            <HomePage
-              onGoProjects={() => setCurrentPage("projects")}
-              onGoProfile={goProfile}
-            />
-          )}
-
-          {currentPage === "projects" && <ProjectsPage user={user} />}
-
-          {currentPage === "messages" && <MessagesPage messages={messages} />}
-
-          {currentPage === "profile" && <ProfilePage user={user} />}
+          <Outlet context={{ user, userData, profileReady }} />
         </main>
-
-        {!userData?.assessmentCompleted && (
-          <section className="tf-card tf-panel" style={{ marginTop: 16 }}>
-            <h3 className="tf-section-title">Complete Assessment First</h3>
-            <AssessmentPage user={user} onDone={onAssessmentDone} />
-          </section>
-        )}
       </div>
     </div>
   );
 }
 
+function useOutletCtx() {
+  return useOutletContext();
+}
+
+function HomeRoute() {
+  const { user, userData } = useOutletCtx();
+  const navigate = useNavigate();
+  return (
+    <HomePage
+      onGoProjects={() => navigate("/projects")}
+      onGoProfile={() => navigate("/profile")}
+      user={user}
+      userData={userData}
+    />
+  );
+}
+
+function ProfileRoute() {
+  const { user, userData } = useOutletCtx();
+  return <ProfilePage user={user} userData={userData} />;
+}
+
+function ProjectsRoute() {
+  const { user, userData, profileReady } = useOutletCtx();
+  return (
+    <RequireReady userData={userData} profileReady={profileReady}>
+      <ProjectsPage user={user} />
+    </RequireReady>
+  );
+}
+
+function MessagesRoute() {
+  const { user, userData, profileReady } = useOutletCtx();
+  return (
+    <RequireReady userData={userData} profileReady={profileReady}>
+      <MessagesPage user={user} />
+    </RequireReady>
+  );
+}
+
 export default function App() {
   const [user, setUser] = useState(null);
-  const [loadingProfile, setLoadingProfile] = useState(true);
-  const [currentPage, setCurrentPage] = useState("home");
-  const [userData, setUserData] = useState(null);
-  const [messages, setMessages] = useState([]);
-  const [gateMsg, setGateMsg] = useState("");
 
+  // ✅ NEW: prevents flicker by waiting for the initial Firebase auth check
+  const [authReady, setAuthReady] = useState(false);
+
+  const [loadingProfile, setLoadingProfile] = useState(true);
+  const [userData, setUserData] = useState(null);
+
+  // 1) auth + ensure user doc exists
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
-      setGateMsg("");
+      setAuthReady(true); // ✅ auth check completed at least once
 
       if (!nextUser) {
+        setUserData(null);
         setLoadingProfile(false);
         return;
       }
@@ -240,32 +320,54 @@ export default function App() {
       const snap = await getDoc(ref);
 
       if (!snap.exists()) {
-        await setDoc(ref, {
-          displayName: nextUser.displayName ?? "",
-          email: nextUser.email ?? "",
-          photoURL: nextUser.photoURL ?? "",
-          createdAt: serverTimestamp(),
-          traits: null,
-          traitCounts: null,
-          projectsCompleted: 0,
-          assessmentCompleted: false,
-          profile: {
-            name: nextUser.displayName ?? "",
-            university: "",
-            faculty: "",
-            yearOfStudy: "Y1",
-            confidenceLevel: 70,
+        await setDoc(
+          ref,
+          {
+            displayName: nextUser.displayName ?? "",
+            email: nextUser.email ?? "",
+            photoURL: nextUser.photoURL ?? "",
+            createdAt: serverTimestamp(),
+            assessmentCompleted: false,
+            traits: {
+              communication: 0,
+              conflictHandling: 0,
+              awareness: 0,
+              supportiveness: 0,
+              adaptability: 0,
+              alignment: 0,
+              trustworthiness: 0,
+            },
+            profile: {
+              fullName: nextUser.displayName ?? "",
+              username: "",
+              usernameLower: "",
+              university: "",
+              course: "",
+              yearOfStudy: "1",
+              studentIdStatus: "Not submitted",
+              geminiVerification: {
+                status: "Not verified",
+                lastCheckedAt: null,
+                note: "",
+              },
+            },
+            // cleanup deprecated fields
+            idVerification: deleteField(),
+            traitCounts: deleteField(),
           },
-        });
+          { merge: true }
+        );
       }
 
-      setCurrentPage("home");
       setLoadingProfile(false);
     });
 
     return () => unsub();
   }, []);
 
+  
+
+  // 2) live user doc
   useEffect(() => {
     if (!user) return undefined;
     const unsub = onSnapshot(doc(db, "users", user.uid), (snap) => {
@@ -274,54 +376,10 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
-  useEffect(() => {
-    if (!user) return undefined;
-    const q = query(collection(db, "messages"), where("uid", "==", user.uid));
-    const unsub = onSnapshot(q, (snap) => {
-      if (snap.empty) {
-        setMessages([
-          {
-            id: "r1",
-            type: "received",
-            title: "Team invite",
-            body: "You were invited to join DataViz FYP team.",
-          },
-          {
-            id: "s1",
-            type: "sent",
-            title: "Application sent",
-            body: "You applied to Web Security group.",
-          },
-        ]);
-        return;
-      }
-
-      setMessages(snap.docs.map((d) => ({ id: d.id, ...d.data() })));
-    });
-    return () => unsub();
-  }, [user]);
-
   const profileReady = useMemo(() => {
-    const profile = userData?.profile;
-    return Boolean(profile?.name && profile?.university && profile?.faculty);
+    const p = userData?.profile;
+    return Boolean(p?.fullName && p?.username && p?.university && p?.course && p?.yearOfStudy);
   }, [userData]);
-
-  function goProfile() {
-    if (!userData?.assessmentCompleted) {
-      setGateMsg("Please complete the assessment first before entering Profile.");
-      setCurrentPage("home");
-      return;
-    }
-
-    if (!profileReady) {
-      setGateMsg("Please complete your bio info (name, university, faculty) first.");
-      setCurrentPage("home");
-      return;
-    }
-
-    setGateMsg("");
-    setCurrentPage("profile");
-  }
 
   async function handleLogin() {
     await signInWithPopup(auth, googleProvider);
@@ -331,29 +389,30 @@ export default function App() {
     await signOut(auth);
   }
 
-  function handleAssessmentDone() {
-    setGateMsg("Assessment completed. Please fill in bio info, then open Profile.");
-  }
-
-  if (!user) {
-    return <LoggedOutView onLogin={handleLogin} />;
-  }
-
-  if (loadingProfile) {
-    return <LoadingState />;
-  }
+  // ✅ NEW: wait for initial auth state before showing logged-out or routes
+  if (!authReady) return <LoadingState />;
+  if (!user) return <LoggedOutView onLogin={handleLogin} />;
+  if (loadingProfile) return <LoadingState />;
 
   return (
-    <LoggedInView
-      user={user}
-      userData={userData}
-      currentPage={currentPage}
-      setCurrentPage={setCurrentPage}
-      gateMsg={gateMsg}
-      goProfile={goProfile}
-      messages={messages}
-      onLogout={handleLogout}
-      onAssessmentDone={handleAssessmentDone}
-    />
+    <Routes>
+      {/* Root route: render Home directly to avoid extra redirect flashes */}
+      <Route path="/" element={<Navigate to="/home" replace />} />
+
+      {/* Logged-in shell */}
+      <Route
+        element={
+          <LoggedInLayout user={user} userData={userData} profileReady={profileReady} onLogout={handleLogout} />
+        }
+      >
+        <Route path="/home" element={<HomeRoute />} />
+        <Route path="/profile" element={<ProfileRoute />} />
+        <Route path="/projects" element={<ProjectsRoute />} />
+        <Route path="/messages" element={<MessagesRoute />} />
+      </Route>
+
+      {/* Fallback */}
+      <Route path="*" element={<Navigate to="/home" replace />} />
+    </Routes>
   );
 }

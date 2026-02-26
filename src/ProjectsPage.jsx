@@ -1,3 +1,5 @@
+// src/ProjectsPage.jsx
+import { GoogleGenAI } from "@google/genai";
 import { useEffect, useMemo, useState } from "react";
 import { db } from "./firebase";
 import {
@@ -34,22 +36,21 @@ const PROJECT_TYPES = [
   "Studio / Creative",
 ];
 
+// --- Compatibility (Similarity 60% + Quality 40%) ---
 function calcCompatibility(traitsA = {}, traitsB = {}) {
-  // 1) diff per trait
-  // 2) similarity = 1 - diff/4 (since scale 1..5, max gap 4)
-  // 3) base score = avg(similarity)*100
+  // Similarity per trait: 1 - diff/4
   const sims = TRAITS.map((key) => {
     const diff = Math.abs(Number(traitsA[key] ?? 0) - Number(traitsB[key] ?? 0));
     return 1 - diff / 4;
   });
   const baseScore = (sims.reduce((a, b) => a + b, 0) / TRAITS.length) * 100;
 
-  // quality score: two low-rated users shouldn't be "great" just because they're similar
+  // Quality: avg trait level
   const qualityA = TRAITS.reduce((acc, key) => acc + Number(traitsA[key] ?? 0), 0) / TRAITS.length;
   const qualityB = TRAITS.reduce((acc, key) => acc + Number(traitsB[key] ?? 0), 0) / TRAITS.length;
   const qualityScore = ((qualityA + qualityB) / 2 / 5) * 100;
 
-  // weighted
+  // Weighted final
   return Math.round(baseScore * 0.6 + qualityScore * 0.4);
 }
 
@@ -60,12 +61,140 @@ function getWorkstyleLabel(score) {
   return "Developing Teammate";
 }
 
-function getGeminiAdvisor(score, target) {
-  if (score >= 80)
-    return `Gemini Advisor: Great fit with ${target}. Strong compatibility for this project scope.`;
-  if (score >= 60)
-    return `Gemini Advisor: Good fit with ${target}. Set clear roles early to improve alignment.`;
-  return `Gemini Advisor: Moderate fit with ${target}. Communicate frequently and review responsibilities weekly.`;
+// --- Term (Option A): short<=7, medium 8-30, long>30 ---
+function computeTermFromDueDate(dueDateStr) {
+  const today = new Date();
+  const due = new Date(dueDateStr);
+  const diffDays = Math.ceil((due - today) / (1000 * 60 * 60 * 24));
+  if (diffDays <= 7) return "short";
+  if (diffDays <= 30) return "medium";
+  return "long";
+}
+
+// Small capped boost (0..5) from topTraits average
+function priorityBoost(candidateTraits = {}, topTraits = []) {
+  if (!topTraits?.length) return 0;
+  const avgTop =
+    topTraits.reduce((acc, t) => acc + Number(candidateTraits?.[t] ?? 0), 0) / topTraits.length;
+  return Math.round((avgTop / 5) * 5); // 0..5 points
+}
+
+// --- Gemini: get top 3 traits based on projectType + term (LOCAL ONLY) ---
+async function getGeminiTopTraits({ projectType, term }) {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) throw new Error("Missing VITE_GEMINI_API_KEY in .env.local");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `
+Pick TOP 3 collaboration traits for the project.
+
+Project type: ${projectType}
+Project term: ${term} (short<=7 days, medium=8-30 days, long>30 days)
+
+Traits (choose ONLY from this list):
+communication, conflictHandling, awareness, supportiveness, adaptability, alignment, trustworthiness
+
+Return STRICT JSON ONLY (no markdown, no extra keys):
+{
+  "topTraits": ["trait1","trait2","trait3"],
+  "rationale": {
+    "trait1": "one sentence reason",
+    "trait2": "one sentence reason",
+    "trait3": "one sentence reason"
+  }
+}
+Rules:
+- topTraits must be exactly 3 distinct items.
+- Use only allowed trait names.
+`;
+
+  const resp = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+  });
+
+  const raw = resp.text.trim();
+  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+  const parsed = JSON.parse(cleaned);
+
+  const allowed = new Set(TRAITS);
+  const top = Array.isArray(parsed.topTraits) ? parsed.topTraits : [];
+  const uniq = [...new Set(top)];
+  if (uniq.length !== 3 || !uniq.every((t) => allowed.has(t))) {
+    throw new Error("Gemini returned invalid topTraits");
+  }
+
+  return {
+    topTraits: uniq,
+    rationale: parsed.rationale || {},
+  };
+}
+
+// --- Gemini: pairing advisor after matching (LOCAL ONLY) ---
+async function getGeminiPairingAdvisor({
+  projectType,
+  term,
+  dueDate,
+  userName,
+  candidateName,
+  userTraits,
+  candidateTraits,
+  topTraits,
+  baseScore,
+  qualityScore,
+  finalScore,
+}) {
+  const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
+  if (!apiKey) throw new Error("Missing VITE_GEMINI_API_KEY in .env.local");
+
+  const ai = new GoogleGenAI({ apiKey });
+
+  const prompt = `
+You are "Gemini Advisor" for a student team matching app.
+Use ONLY the numeric traits given. Don't invent facts.
+
+Project: ${projectType}
+Term: ${term}
+Due date: ${dueDate}
+
+User: ${userName}
+Candidate: ${candidateName}
+
+Top 3 prioritized traits for this project: ${topTraits.join(", ")}
+
+User traits (1-5): ${JSON.stringify(userTraits)}
+Candidate traits (1-5): ${JSON.stringify(candidateTraits)}
+
+Scores:
+baseSimilarityScore (0-100): ${baseScore}
+qualityScore (0-100): ${qualityScore}
+finalCompatibility (0-100): ${finalScore}
+
+Return STRICT JSON ONLY:
+{
+  "workstyleLabel": "creative label (2-4 words)",
+  "summary": "1-2 sentences fit summary",
+  "strengths": ["one strength", "one strength"],
+  "risks": ["one risk"],
+  "actions": ["one concrete action", "one concrete action"]
+}
+
+Rules:
+- Mention at least one strength from candidate's high traits (>=4) or topTraits.
+- Mention one risk if any trait is low (<=2) OR if a topTrait is weak compared to user.
+- Actions must be practical (roles, check-ins, communication plan).
+No markdown.
+`;
+
+  const resp = await ai.models.generateContent({
+    model: "gemini-2.5-flash",
+    contents: prompt,
+  });
+
+  const raw = resp.text.trim();
+  const cleaned = raw.replace(/^```json\s*/i, "").replace(/```$/i, "").trim();
+  return JSON.parse(cleaned);
 }
 
 export default function ProjectsPage({ user }) {
@@ -101,7 +230,7 @@ export default function ProjectsPage({ user }) {
     if (!user) return;
 
     if (!form.projectName.trim() || !form.projectType || !form.dueDate || Number(form.teamSize) < 2) {
-      setStatus("Please fill Project Name, Project Type, Team Size (min 2), and Due Date.");
+      setStatus("Please fill Project Name, Project Type, Team Size (min 2, include), and Due Date.");
       return;
     }
 
@@ -110,11 +239,23 @@ export default function ProjectsPage({ user }) {
     setPairedMembers([]);
     setAdvisor("");
 
+    const term = computeTermFromDueDate(form.dueDate);
+
+    // 1) Ask Gemini for top 3 traits (local-only). Fallback to empty if fails.
+    let priority = { topTraits: [], rationale: {} };
+    try {
+      priority = await getGeminiTopTraits({ projectType: form.projectType, term });
+      console.log("Gemini topTraits:", priority.topTraits, priority.rationale);
+    } catch (e) {
+      console.warn("Gemini topTraits failed (fallback to none):", e);
+    }
+
+    // 2) Load my traits
     const myUserSnap = await getDoc(doc(db, "users", user.uid));
     const myUserData = myUserSnap.exists() ? myUserSnap.data() : {};
     const myTraits = myUserData?.traits || {};
 
-    // Try join existing project with same name/type/current
+    // 3) Join or create project
     const existingQ = query(
       collection(db, "projects"),
       where("name", "==", form.projectName.trim()),
@@ -150,17 +291,29 @@ export default function ProjectsPage({ user }) {
       projectId = created.id;
     }
 
-    // Pick best candidates
+    // 4) Pick best candidates (requires users read rules to allow signed-in reads)
     const usersSnap = await getDocs(collection(db, "users"));
     const candidates = usersSnap.docs
       .map((d) => ({ id: d.id, ...d.data() }))
       .filter((u) => u.id !== user.uid && !existingMembers.includes(u.id) && u.assessmentCompleted)
       .map((u) => {
-        const score = calcCompatibility(myTraits, u.traits || {});
+        const base = calcCompatibility(myTraits, u.traits || {});
+        const qualityA =
+          TRAITS.reduce((acc, key) => acc + Number(myTraits[key] ?? 0), 0) / TRAITS.length;
+        const qualityB =
+          TRAITS.reduce((acc, key) => acc + Number((u.traits || {})[key] ?? 0), 0) / TRAITS.length;
+        const qualityScore = Math.round(((qualityA + qualityB) / 2 / 5) * 100);
+
+        const boost = priorityBoost(u.traits || {}, priority.topTraits);
+        const final = Math.min(100, base + boost);
+
         return {
           ...u,
-          compatibility: score,
-          workstyleType: getWorkstyleLabel(score),
+          compatibility: final,
+          baseScore: base,
+          qualityScore,
+          priorityBoost: boost,
+          workstyleType: getWorkstyleLabel(final), // fallback label
         };
       })
       .sort((a, b) => b.compatibility - a.compatibility)
@@ -171,8 +324,39 @@ export default function ProjectsPage({ user }) {
         memberUids: arrayUnion(...candidates.map((c) => c.id)),
       });
 
+      // 5) Gemini Advisor for the top candidate (local-only). Fallback to simple advice if fails.
       const top = candidates[0];
-      setAdvisor(getGeminiAdvisor(top.compatibility, top.profile?.fullName || "candidate"));
+
+      try {
+        const advice = await getGeminiPairingAdvisor({
+          projectType: form.projectType,
+          term,
+          dueDate: form.dueDate,
+          userName: myUserData?.profile?.fullName || myUserData?.displayName || "You",
+          candidateName: top.profile?.fullName || "Candidate",
+          userTraits: myTraits,
+          candidateTraits: top.traits || {},
+          topTraits: priority.topTraits,
+          baseScore: top.baseScore,
+          qualityScore: top.qualityScore,
+          finalScore: top.compatibility,
+        });
+
+        // apply Gemini label if returned
+        top.workstyleType = advice.workstyleLabel || top.workstyleType;
+
+        setAdvisor(
+          `Gemini Advisor: ${advice.summary}\n\nStrengths: ${advice.strengths?.join("; ")}\nRisk: ${
+            advice.risks?.join("; ") || "None"
+          }\nActions: ${advice.actions?.join("; ")}`
+        );
+      } catch (e) {
+        console.warn("Gemini advisor failed (fallback):", e);
+        // fallback text if Gemini fails
+        setAdvisor(
+          `Gemini Advisor: Good match. Prioritize ${priority.topTraits.join(", ") || "clear communication"} and set clear roles early.`
+        );
+      }
     }
 
     setPairedMembers(candidates);
@@ -207,12 +391,18 @@ export default function ProjectsPage({ user }) {
         <div className="tf-project-form">
           <label className="tf-field">
             <span>Project Name (official project name)</span>
-            <input value={form.projectName} onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))} />
+            <input
+              value={form.projectName}
+              onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))}
+            />
           </label>
 
           <label className="tf-field">
             <span>Project Type</span>
-            <select value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}>
+            <select
+              value={form.projectType}
+              onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}
+            >
               {PROJECT_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -222,7 +412,7 @@ export default function ProjectsPage({ user }) {
           </label>
 
           <label className="tf-field">
-            <span>Team Size</span>
+            <span>Team Size (Include Yourself)</span>
             <input
               type="number"
               min="2"
@@ -234,7 +424,11 @@ export default function ProjectsPage({ user }) {
 
           <label className="tf-field">
             <span>Due Date</span>
-            <input type="date" value={form.dueDate} onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))} />
+            <input
+              type="date"
+              value={form.dueDate}
+              onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
+            />
           </label>
         </div>
 
@@ -263,7 +457,9 @@ export default function ProjectsPage({ user }) {
               </div>
               <div className="tf-badge-row">
                 <span className="tf-mini-chip">{m.workstyleType}</span>
-                <span className="tf-mini-chip">{m.compatibility}% compatible</span>
+                <span className="tf-mini-chip">
+                  {m.compatibility}% compatible {m.priorityBoost ? `(+${m.priorityBoost})` : ""}
+                </span>
               </div>
             </article>
           ))}
@@ -295,7 +491,11 @@ export default function ProjectsPage({ user }) {
                   {(project.memberUids || [])
                     .filter((uid) => uid !== user.uid)
                     .map((uid) => (
-                      <button key={uid} className="tf-btn tf-btn-light" onClick={() => removeTeammate(project.id, uid)}>
+                      <button
+                        key={uid}
+                        className="tf-btn tf-btn-light"
+                        onClick={() => removeTeammate(project.id, uid)}
+                      >
                         Remove teammate {uid.slice(0, 5)}...
                       </button>
                     ))}

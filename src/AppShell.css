@@ -69,6 +69,8 @@ body {
   justify-content: space-between;
   gap: 14px;
   padding: 12px 14px;
+  position: relative;
+  z-index: 1000;   /* 👈 ensures navbar is above everything */
 }
 
 .tf-brand { display: flex; align-items: center; gap: 10px; }
@@ -124,10 +126,11 @@ body {
   background: #fff;
   border: 1px solid var(--line);
   border-radius: 14px;
-  box-shadow: 0 18px 60px rgba(0,0,0,.12);
+  box-shadow: 0 18px 60px rgba(0,0,0,.18);
   overflow: hidden;
-  z-index: 50;
+  z-index: 9999;   /* 👈 VERY HIGH so nothing blocks it */
 }
+
 .tf-menu-item {
   width: 100%;
   text-align: left;
@@ -437,11 +440,7 @@ body {
 }
 
 /* ===== HARD FIX: prevent invisible overlays blocking clicks anywhere ===== */
-.tf-card, .tf-panel, .tf-main-page, .tf-profile-page {
-  position: relative;
-  z-index: 1;
-  pointer-events: auto;
-}
+
 
 /* ===== Responsive ===== */
 @media (max-width: 1080px) {

@@ -253,7 +253,12 @@ function LoggedInLayout({
           </nav>
 
           <div className="tf-actions">
-            <ProfileMenu user={user} onGoProfile={goProfile} onGoMessages={goMessages} onLogout={onLogout} />
+            <ProfileMenu
+              user={user}
+              onGoProfile={goProfile}
+              onGoMessages={goMessages}
+              onLogout={onLogout}
+            />
           </div>
         </header>
 
@@ -412,7 +417,7 @@ export default function App() {
                 note: "",
               },
             },
-            ratingDismissed: {}, // ✅ NEW: store dismissed project IDs
+            ratingDismissed: {}, // ✅ store dismissed project IDs
             idVerification: deleteField(),
             traitCounts: deleteField(),
           },
@@ -440,7 +445,11 @@ export default function App() {
     return Boolean(p?.fullName && p?.username && p?.university && p?.course && p?.yearOfStudy);
   }, [userData]);
 
+  // ✅ FIX: Always show Google account chooser (prevents reusing previous account automatically)
   async function handleLogin() {
+    googleProvider.setCustomParameters({
+      prompt: "select_account",
+    });
     await signInWithPopup(auth, googleProvider);
   }
 
@@ -488,7 +497,9 @@ export default function App() {
           const ratingData = ratingSnap.data();
           if ((ratingData.status || "open") !== "open") continue;
 
-          const subSnap = await getDoc(doc(db, "projectRatings", projectId, "submissions", user.uid));
+          const subSnap = await getDoc(
+            doc(db, "projectRatings", projectId, "submissions", user.uid)
+          );
           if (subSnap.exists()) continue;
 
           if (!cancelled) {
@@ -568,4 +579,4 @@ export default function App() {
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   );
-}
+} 

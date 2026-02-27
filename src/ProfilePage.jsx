@@ -133,7 +133,6 @@ function GeminiVerificationCard({ user, profile, onStatusChange }) {
         : "Turn on camera and hold student ID in frame.",
     };
 
-    // ✅ IMPORTANT: use dotted path update so we don't overwrite the whole profile object
     await updateDoc(doc(db, "users", user.uid), {
       "profile.geminiVerification": result,
       profileUpdatedAt: serverTimestamp(),
@@ -152,15 +151,15 @@ function GeminiVerificationCard({ user, profile, onStatusChange }) {
 
       <div className="tf-inline-actions">
         {!cameraOn ? (
-          <button className="tf-btn" onClick={startCamera}>
+          <button type="button" className="tf-btn" onClick={startCamera}>
             Enable Camera
           </button>
         ) : (
-          <button className="tf-btn" onClick={stopCamera}>
+          <button type="button" className="tf-btn" onClick={stopCamera}>
             Stop Camera
           </button>
         )}
-        <button className="tf-btn tf-btn-primary" onClick={runGeminiCheck}>
+        <button type="button" className="tf-btn tf-btn-primary" onClick={runGeminiCheck}>
           Run Gemini Verification
         </button>
       </div>
@@ -205,7 +204,7 @@ export default function ProfilePage({ user, userData }) {
     return () => unsub();
   }, [user]);
 
-  // Count completed projects
+  // Count completed projects (ownerUid only, as your current logic)
   useEffect(() => {
     if (!user) return;
     const q = query(
@@ -225,8 +224,7 @@ export default function ProfilePage({ user, userData }) {
   }, [traits]);
 
   const overallText = useMemo(() => {
-    const score = overallAvg;
-    return score ? score.toFixed(2) : "0.00";
+    return overallAvg ? overallAvg.toFixed(2) : "0.00";
   }, [overallAvg]);
 
   const confidence = useMemo(() => {
@@ -239,7 +237,6 @@ export default function ProfilePage({ user, userData }) {
   async function saveProfile() {
     if (!user) return;
 
-    // (Optional) clear previous messages
     setStatus("");
 
     if (
@@ -270,9 +267,7 @@ export default function ProfilePage({ user, userData }) {
 
       setStatus("Saving profile...");
 
-      // ✅ IMPORTANT FIX:
-      // Use updateDoc + dotted paths so we DON'T overwrite the whole "profile" map
-      // (which would wipe geminiVerification, etc.)
+      // Use dotted paths so we DON'T overwrite the whole profile map
       await updateDoc(doc(db, "users", user.uid), {
         "profile.fullName": profile.fullName.trim(),
         "profile.username": profile.username.trim(),
@@ -296,7 +291,7 @@ export default function ProfilePage({ user, userData }) {
   }
 
   return (
-    <div className="tf-profile-page">
+    <div className="tf-profile-page" style={{ position: "relative", zIndex: 1 }}>
       <section className="tf-card tf-panel tf-panel-wide tf-profile-main-card">
         <h2 className="tf-h2">Edit Your Profile</h2>
         <p className="tf-muted">Let teammates know who you are and how you work.</p>
@@ -366,14 +361,14 @@ export default function ProfilePage({ user, userData }) {
         </div>
 
         <div className="tf-inline-actions">
-          <button className="tf-btn tf-btn-primary" onClick={saveProfile}>
+          <button type="button" className="tf-btn tf-btn-primary" onClick={saveProfile}>
             Save Profile
           </button>
           {status && <p className="tf-muted">{status}</p>}
         </div>
       </section>
 
-      <section className="tf-card tf-panel">
+      <section className="tf-card tf-panel" style={{ position: "relative", zIndex: 2, pointerEvents: "auto" }}>
         <h3 className="tf-section-title">Workstyle</h3>
 
         {userData?.assessmentCompleted ? (
@@ -386,11 +381,19 @@ export default function ProfilePage({ user, userData }) {
         ) : (
           <>
             <p className="tf-muted">Complete assessment to reveal your radar chart.</p>
-            <button className="tf-btn" onClick={() => setShowAssessment((v) => !v)}>
-              Complete Assessment
+
+            {/* ✅ FIX: make button always clickable */}
+            <button
+              type="button"
+              className="tf-btn"
+              onClick={() => setShowAssessment((v) => !v)}
+              style={{ pointerEvents: "auto", position: "relative", zIndex: 10 }}
+            >
+              {showAssessment ? "Hide Assessment" : "Complete Assessment"}
             </button>
+
             {showAssessment && (
-              <div style={{ marginTop: 12 }}>
+              <div style={{ marginTop: 12, position: "relative", zIndex: 10, pointerEvents: "auto" }}>
                 <AssessmentPage
                   user={user}
                   onDone={() => {

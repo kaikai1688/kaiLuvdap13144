@@ -371,7 +371,8 @@ export default function ProfilePage({ user, userData }) {
       <section className="tf-card tf-panel" style={{ position: "relative", zIndex: 2, pointerEvents: "auto" }}>
         <h3 className="tf-section-title">Workstyle</h3>
 
-        {userData?.assessmentCompleted ? (
+
+ {userData?.assessmentCompleted ? (
           <>
             <RadarChart values={traits} />
             <p className="tf-muted">

@@ -22,28 +22,40 @@ export default function AssessmentPage({ user, onDone }) {
     alignment: 3,
     trustworthiness: 3,
   });
+
   const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
 
   async function saveAssessment() {
     if (!user) return;
-    setStatus("Saving assessment...");
+    if (saving) return;
 
-    await setDoc(
-      doc(db, "users", user.uid),
-      {
-        traits,
-        assessmentCompleted: true,
-        traitsUpdatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    try {
+      setSaving(true);
+      setStatus("Saving assessment...");
 
-    setStatus("Assessment saved ✅");
-    onDone?.();
+      await setDoc(
+        doc(db, "users", user.uid),
+        {
+          traits,
+          assessmentCompleted: true,
+          traitsUpdatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      setStatus("Assessment saved ✅");
+      onDone?.();
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.message || "Save failed");
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <div className="tf-card tf-panel">
+    <div className="tf-card tf-panel" style={{ position: "relative", zIndex: 20, pointerEvents: "auto" }}>
       <h2 className="tf-h2">Working Style Assessment</h2>
       <p className="tf-muted">Likert scale: 1 (lowest) to 5 (highest).</p>
 
@@ -51,7 +63,8 @@ export default function AssessmentPage({ user, onDone }) {
         {QUESTIONS.map(([key, q]) => (
           <div key={key} className="tf-likert-row">
             <div className="tf-likert-question">{q}</div>
-            <div className="tf-likert-options">
+
+            <div className="tf-likert-options" style={{ pointerEvents: "auto" }}>
               {[1, 2, 3, 4, 5].map((score) => {
                 const active = traits[key] === score;
                 return (
@@ -61,6 +74,7 @@ export default function AssessmentPage({ user, onDone }) {
                     className={`tf-likert-dot ${active ? "is-active" : ""}`}
                     onClick={() => setTraits((prev) => ({ ...prev, [key]: score }))}
                     aria-label={`${key} score ${score}`}
+                    style={{ pointerEvents: "auto", position: "relative", zIndex: 30 }}
                   >
                     {score}
                   </button>
@@ -71,10 +85,17 @@ export default function AssessmentPage({ user, onDone }) {
         ))}
       </div>
 
-      <button className="tf-btn tf-btn-primary" onClick={saveAssessment} style={{ marginTop: 14 }}>
-        Submit Assessment
+      <button
+        type="button"
+        className="tf-btn tf-btn-primary"
+        onClick={saveAssessment}
+        disabled={saving}
+        style={{ marginTop: 14, pointerEvents: "auto", position: "relative", zIndex: 30 }}
+      >
+        {saving ? "Saving..." : "Submit Assessment"}
       </button>
-      {status && <p>{status}</p>}
+
+      {status && <p className="tf-muted" style={{ marginTop: 10 }}>{status}</p>}
     </div>
   );
 }

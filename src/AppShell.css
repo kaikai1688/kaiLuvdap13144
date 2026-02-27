@@ -280,6 +280,33 @@ body {
 .tf-radar-dot { fill: #6d55f8; }
 .tf-radar-label { fill: #233359; font-size: 10px; text-transform: capitalize; }
 
+/* ===== Likert / Assessment (ADDED: makes buttons clickable) ===== */
+.tf-likert-row { display: grid; gap: 8px; pointer-events: auto; }
+.tf-likert-question { font-size: 14px; font-weight: 700; pointer-events: auto; }
+.tf-likert-options { display: flex; gap: 8px; flex-wrap: wrap; pointer-events: auto; }
+
+.tf-likert-dot{
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid #d5daf0;
+  background: #fff;
+  color: #273458;
+  cursor: pointer;
+  font-weight: 800;
+  pointer-events: auto;               /* ✅ important */
+  user-select: none;
+}
+.tf-likert-dot:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 8px 14px rgba(70, 94, 230, .14);
+}
+.tf-likert-dot.is-active {
+  background: linear-gradient(135deg, #6f4dff, #595def);
+  color: #fff;
+  border-color: transparent;
+}
+
 /* ===== Projects ===== */
 .tf-project-page { display: grid; gap: 14px; }
 .tf-project-list { display: grid; gap: 10px; }
@@ -409,6 +436,13 @@ body {
   box-shadow: 0 0 0 2px rgba(106,76,255,.12);
 }
 
+/* ===== HARD FIX: prevent invisible overlays blocking clicks anywhere ===== */
+.tf-card, .tf-panel, .tf-main-page, .tf-profile-page {
+  position: relative;
+  z-index: 1;
+  pointer-events: auto;
+}
+
 /* ===== Responsive ===== */
 @media (max-width: 1080px) {
   .tf-auth-wrap-xl,
@@ -422,7 +456,7 @@ body {
   }
 
   .tf-messages-page {
-    grid-template-columns: 1fr; /* ✅ stack left + right, no “duplicate” feel */
+    grid-template-columns: 1fr;
   }
 
   .tf-chat-list-body { max-height: 280px; }

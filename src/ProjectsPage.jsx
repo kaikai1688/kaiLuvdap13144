@@ -1,4 +1,5 @@
 // src/ProjectsPage.jsx
+import { useNavigate } from "react-router-dom";
 import { useEffect, useMemo, useState } from "react";
 import { GoogleGenAI } from "@google/genai";
 import { db } from "./firebase";
@@ -15,6 +16,7 @@ import {
   serverTimestamp,
   updateDoc,
   where,
+  setDoc,
 } from "firebase/firestore";
 
 const TRAITS = [
@@ -58,7 +60,6 @@ function getWorkstyleLabel(score) {
 }
 
 function computeTermFromDueDate(dueDateStr) {
-  // dueDateStr is "YYYY-MM-DD"
   const due = new Date(dueDateStr + "T00:00:00");
   const now = new Date();
   const diffDays = Math.ceil((due.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
@@ -77,7 +78,6 @@ async function withTimeout(promise, ms, label = "Timed out") {
 async function geminiAdvisorForMatch({ candidateName, projectType, term, myTraits, theirTraits }) {
   const apiKey = import.meta.env.VITE_GEMINI_API_KEY;
   if (!apiKey) {
-    // fallback if you didn’t set env
     return `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early and communicate often.`;
   }
 
@@ -106,12 +106,13 @@ Do NOT output markdown, just plain text.
     contents: prompt,
   });
 
-  // The SDK returns structured output; easiest safe access:
   const text = resp?.text || resp?.candidates?.[0]?.content?.parts?.[0]?.text || "";
   return text?.trim() || `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early.`;
 }
 
 export default function ProjectsPage({ user }) {
+  const navigate = useNavigate();
+
   const [form, setForm] = useState({
     projectName: "",
     projectType: PROJECT_TYPES[0],
@@ -126,11 +127,8 @@ export default function ProjectsPage({ user }) {
   const [pairedMembers, setPairedMembers] = useState([]);
   const [advisor, setAdvisor] = useState("");
 
-  // ✅ Important: store active project info for Connect requests
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [activeProjectName, setActiveProjectName] = useState("");
-
-  // Outgoing requests for THIS active project (User A perspective)
   const [outgoingForActiveProject, setOutgoingForActiveProject] = useState([]);
 
   useEffect(() => {
@@ -142,7 +140,6 @@ export default function ProjectsPage({ user }) {
     return () => unsub();
   }, [user]);
 
-  // listen outgoing requests for current activeProjectId
   useEffect(() => {
     if (!user || !activeProjectId) return;
     const q = query(
@@ -178,7 +175,6 @@ export default function ProjectsPage({ user }) {
   async function sendConnectRequest(candidate, projectId) {
     if (!user || !projectId) return;
 
-    // prevent duplicate pending request
     const existingQ = query(
       collection(db, "connectionRequests"),
       where("fromUid", "==", user.uid),
@@ -208,7 +204,7 @@ export default function ProjectsPage({ user }) {
       updatedAt: serverTimestamp(),
     });
 
-    setStatus(`Connect request sent to ${candidate.profile?.fullName || candidate.profile?.username || "user"} ✅`);
+    setStatus(`Connect request sent ✅`);
   }
 
   async function startPairing() {
@@ -227,12 +223,10 @@ export default function ProjectsPage({ user }) {
     try {
       const term = computeTermFromDueDate(form.dueDate);
 
-      // 1) Load my traits
       const myUserSnap = await getDoc(doc(db, "users", user.uid));
       const myUserData = myUserSnap.exists() ? myUserSnap.data() : {};
       const myTraits = myUserData?.traits || {};
 
-      // 2) Create or join project (IMPORTANT: do NOT auto-add candidates)
       const existingQ = query(
         collection(db, "projects"),
         where("name", "==", form.projectName.trim()),
@@ -262,35 +256,28 @@ export default function ProjectsPage({ user }) {
           teamSize: Number(form.teamSize),
           dueDate: form.dueDate,
           status: "current",
-          memberUids: [user.uid], // ✅ only owner at first
+          memberUids: [user.uid],
           createdAt: serverTimestamp(),
         });
         projectId = created.id;
       }
 
-      // ✅ Save active project info (used by Connect + A Inbox)
       setActiveProjectId(projectId);
       setActiveProjectName(form.projectName.trim());
 
-      // 3) Pick best candidates (suggest only)
       const usersSnap = await getDocs(collection(db, "users"));
       const candidates = usersSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((u) => u.id !== user.uid && !existingMembers.includes(u.id) && u.assessmentCompleted)
         .map((u) => {
           const score = calcCompatibility(myTraits, u.traits || {});
-          return {
-            ...u,
-            compatibility: score,
-            workstyleType: getWorkstyleLabel(score),
-          };
+          return { ...u, compatibility: score, workstyleType: getWorkstyleLabel(score) };
         })
         .sort((a, b) => b.compatibility - a.compatibility)
         .slice(0, Math.max(0, Number(form.teamSize) - 1));
 
       setPairedMembers(candidates);
 
-      // 4) Gemini advisor AFTER pairing (use top candidate)
       if (candidates.length > 0) {
         const top = candidates[0];
         const candidateName = top.profile?.fullName || top.profile?.username || "candidate";
@@ -308,20 +295,17 @@ export default function ProjectsPage({ user }) {
             "Gemini advisor timed out"
           );
           setAdvisor(aiText);
-        } catch (e) {
-          // fallback
-          setAdvisor(
-            `Gemini Advisor: Good fit with ${candidateName}. Set clear roles early, especially for a ${term}-term project.`
-          );
+        } catch {
+          setAdvisor(`Gemini Advisor: Good fit with ${candidateName}.`);
         }
       } else {
         setAdvisor("Gemini Advisor: No suitable candidates found yet. Try again later.");
       }
 
-      setStatus("Pairing successful ✅ (Now press Connect to invite)");
+      setStatus("Pairing successful ✅");
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || "Pairing failed. Check console.");
+      setStatus(err?.message || "Pairing failed.");
     } finally {
       setLoadingPairing(false);
     }
@@ -334,16 +318,57 @@ export default function ProjectsPage({ user }) {
   }
 
   async function endProject(projectId) {
-    await updateDoc(doc(db, "projects", projectId), {
-      status: "completed",
-      endedAt: serverTimestamp(),
-    });
-  }
+    if (!user) return;
 
-  async function undoEnd(projectId) {
-    await updateDoc(doc(db, "projects", projectId), {
-      status: "current",
-    });
+    const ok = window.confirm("End this project now? This will open teammate ratings.");
+    if (!ok) return;
+
+    try {
+      const projSnap = await getDoc(doc(db, "projects", projectId));
+      if (!projSnap.exists()) {
+        setStatus("Project not found.");
+        return;
+      }
+
+      const proj = projSnap.data();
+
+      if (proj.ownerUid !== user.uid) {
+        setStatus("Only the project owner can end this project.");
+        return;
+      }
+
+      if ((proj.status || "current") === "completed") {
+        navigate(`/rate/${projectId}`);
+        return;
+      }
+
+      await updateDoc(doc(db, "projects", projectId), {
+        status: "completed",
+        endedAt: serverTimestamp(),
+      });
+
+      const memberUids = Array.isArray(proj.memberUids) ? proj.memberUids : [user.uid];
+      const term = computeTermFromDueDate(proj.dueDate);
+
+      await setDoc(
+        doc(db, "projectRatings", projectId),
+        {
+          projectId,
+          projectType: proj.projectType || "",
+          term,
+          memberUids,
+          status: "open",
+          endedByUid: user.uid,
+          createdAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+
+      navigate(`/rate/${projectId}`);
+    } catch (e) {
+      console.error(e);
+      setStatus(e?.message || "End project failed.");
+    }
   }
 
   return (
@@ -354,18 +379,12 @@ export default function ProjectsPage({ user }) {
         <div className="tf-project-form">
           <label className="tf-field">
             <span>Project Name (official project name)</span>
-            <input
-              value={form.projectName}
-              onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))}
-            />
+            <input value={form.projectName} onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))} />
           </label>
 
           <label className="tf-field">
             <span>Project Type</span>
-            <select
-              value={form.projectType}
-              onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}
-            >
+            <select value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}>
               {PROJECT_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -387,11 +406,7 @@ export default function ProjectsPage({ user }) {
 
           <label className="tf-field">
             <span>Due Date</span>
-            <input
-              type="date"
-              value={form.dueDate}
-              onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
-            />
+            <input type="date" value={form.dueDate} onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))} />
           </label>
         </div>
 
@@ -409,7 +424,6 @@ export default function ProjectsPage({ user }) {
         {status && <p className="tf-muted">{status}</p>}
       </section>
 
-      {/* Pairing suggestions + Connect button */}
       {pairedMembers.length > 0 && (
         <section className="tf-team-grid">
           {pairedMembers.map((m) => (
@@ -425,32 +439,23 @@ export default function ProjectsPage({ user }) {
               </div>
 
               <div className="tf-inline-actions" style={{ marginTop: 10 }}>
-                <button
-                  className="tf-btn tf-btn-primary"
-                  onClick={() => sendConnectRequest(m, activeProjectId)}
-                  disabled={!activeProjectId}
-                >
+                <button className="tf-btn tf-btn-primary" onClick={() => sendConnectRequest(m, activeProjectId)} disabled={!activeProjectId}>
                   Connect
                 </button>
               </div>
             </article>
           ))}
 
-          {/* ✅ Gemini Advisor is back */}
           {advisor && <div className="tf-advisor-box">{advisor}</div>}
         </section>
       )}
 
-      {/* ✅ REPLACES the unwanted "Invites for this project" page:
-          This is User A "Inbox" for current created project (pending/accepted/rejected). */}
       {activeProjectId && (
         <section className="tf-card tf-panel">
           <h3 className="tf-section-title">
             Inbox — <b>{activeProjectName || "This project"}</b>
           </h3>
-          <p className="tf-muted tf-small">
-            Status updates for your connect requests (this stays as history).
-          </p>
+          <p className="tf-muted tf-small">Status updates for your connect requests.</p>
 
           <div style={{ display: "grid", gap: 14 }}>
             <div>
@@ -460,10 +465,8 @@ export default function ProjectsPage({ user }) {
               ) : (
                 outgoingPending.map((r) => (
                   <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
-                    <div>
-                      <b>{r.toName || r.toUid}</b>
-                      <div className="tf-muted tf-small">Status: pending</div>
-                    </div>
+                    <b>{r.toName || r.toUid}</b>
+                    <div className="tf-muted tf-small">Status: pending</div>
                   </div>
                 ))
               )}
@@ -476,10 +479,8 @@ export default function ProjectsPage({ user }) {
               ) : (
                 outgoingAccepted.map((r) => (
                   <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
-                    <div>
-                      <b>{r.toName || r.toUid}</b>
-                      <div className="tf-muted tf-small">Status: accepted ✅</div>
-                    </div>
+                    <b>{r.toName || r.toUid}</b>
+                    <div className="tf-muted tf-small">Status: accepted ✅</div>
                   </div>
                 ))
               )}
@@ -492,10 +493,8 @@ export default function ProjectsPage({ user }) {
               ) : (
                 outgoingRejected.map((r) => (
                   <div key={r.id} className="tf-project-item" style={{ marginTop: 8 }}>
-                    <div>
-                      <b>{r.toName || r.toUid}</b>
-                      <div className="tf-muted tf-small">Status: rejected ❌</div>
-                    </div>
+                    <b>{r.toName || r.toUid}</b>
+                    <div className="tf-muted tf-small">Status: rejected ❌</div>
                   </div>
                 ))
               )}
@@ -528,11 +527,7 @@ export default function ProjectsPage({ user }) {
                   {(project.memberUids || [])
                     .filter((uid) => uid !== user.uid)
                     .map((uid) => (
-                      <button
-                        key={uid}
-                        className="tf-btn tf-btn-light"
-                        onClick={() => removeTeammate(project.id, uid)}
-                      >
+                      <button key={uid} className="tf-btn tf-btn-light" onClick={() => removeTeammate(project.id, uid)}>
                         Remove teammate {uid.slice(0, 5)}...
                       </button>
                     ))}
@@ -555,8 +550,10 @@ export default function ProjectsPage({ user }) {
                   <b>{project.name}</b>
                   <div className="tf-muted tf-small">{project.projectType}</div>
                 </div>
-                <button className="tf-btn" onClick={() => undoEnd(project.id)}>
-                  Undo
+
+                {/* ✅ Edit Ratings only */}
+                <button className="tf-btn tf-btn-primary" onClick={() => navigate(`/rate/${project.id}`)}>
+                  Edit Ratings
                 </button>
               </div>
             </div>

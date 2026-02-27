@@ -13,12 +13,25 @@ import {
 
 import { auth, googleProvider, db } from "./firebase";
 import { onAuthStateChanged, signInWithPopup, signOut } from "firebase/auth";
-import { deleteField, doc, getDoc, onSnapshot, serverTimestamp, setDoc } from "firebase/firestore";
+import {
+  collection,
+  deleteField,
+  doc,
+  getDoc,
+  getDocs,
+  onSnapshot,
+  query,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+  where,
+} from "firebase/firestore";
 
 import HomePage from "./HomePage";
 import MessagesPage from "./MessagesPage";
 import ProfilePage from "./ProfilePage";
 import ProjectsPage from "./ProjectsPage";
+import RatingPage from "./RatingPage";
 import RequireReady from "./RequireReady";
 import "./AppShell.css";
 
@@ -109,8 +122,8 @@ function LoggedOutView({ onLogin }) {
 
           <h1 className="tf-h1">Find Your Perfect Team</h1>
           <p className="tf-muted">
-            Match with teammates who complement your workstyle. From FYP to creative projects — build
-            your dream team effortlessly.
+            Match with teammates who complement your workstyle. From FYP to creative projects —
+            build your dream team effortlessly.
           </p>
 
           <button className="tf-btn tf-btn-primary tf-btn-lg" onClick={onLogin}>
@@ -187,12 +200,18 @@ function ProfileMenu({ user, onGoProfile, onGoMessages, onLogout }) {
   );
 }
 
-// Layout renders the top bar + outlet (child routes)
-function LoggedInLayout({ user, userData, profileReady, onLogout }) {
+function LoggedInLayout({
+  user,
+  userData,
+  profileReady,
+  onLogout,
+  ratingNotice,
+  onRateNow,
+  onDismissRating,
+}) {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // show gate message if redirected with state
   const gateMsg = location.state?.gateMsg || "";
 
   function goProfile() {
@@ -200,7 +219,6 @@ function LoggedInLayout({ user, userData, profileReady, onLogout }) {
   }
 
   function goMessages() {
-    // Let route guard handle gating; we just navigate
     navigate("/messages", { replace: false });
   }
 
@@ -238,6 +256,40 @@ function LoggedInLayout({ user, userData, profileReady, onLogout }) {
             <ProfileMenu user={user} onGoProfile={goProfile} onGoMessages={goMessages} onLogout={onLogout} />
           </div>
         </header>
+
+        {/* ✅ Persistent dismiss notification */}
+        {ratingNotice && (
+          <div
+            className="tf-card tf-panel"
+            style={{ marginTop: 12, borderColor: "#ffe3a4", background: "#fff4d9" }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                gap: 12,
+                alignItems: "center",
+                flexWrap: "wrap",
+              }}
+            >
+              <div>
+                <b>Pending rating</b>
+                <div style={{ marginTop: 4 }}>
+                  Please rate your teammates for <b>{ratingNotice.projectName}</b> (project ended).
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 10 }}>
+                <button className="tf-btn tf-btn-primary" onClick={onRateNow}>
+                  Rate Now
+                </button>
+                <button className="tf-btn" onClick={onDismissRating}>
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {gateMsg && (
           <div className="tf-card tf-panel" style={{ marginTop: 12 }}>
@@ -293,20 +345,29 @@ function MessagesRoute() {
   );
 }
 
-export default function App() {
-  const [user, setUser] = useState(null);
+function RatingRoute() {
+  const { user } = useOutletCtx();
+  return <RatingPage user={user} />;
+}
 
-  // ✅ NEW: prevents flicker by waiting for the initial Firebase auth check
+export default function App() {
+  const location = useLocation();
+  const navigate = useNavigate();
+
+  const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [userData, setUserData] = useState(null);
 
+  // ratingNotice: { projectId, projectName }
+  const [ratingNotice, setRatingNotice] = useState(null);
+
   // 1) auth + ensure user doc exists
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, async (nextUser) => {
       setUser(nextUser);
-      setAuthReady(true); // ✅ auth check completed at least once
+      setAuthReady(true);
 
       if (!nextUser) {
         setUserData(null);
@@ -351,7 +412,7 @@ export default function App() {
                 note: "",
               },
             },
-            // cleanup deprecated fields
+            ratingDismissed: {}, // ✅ NEW: store dismissed project IDs
             idVerification: deleteField(),
             traitCounts: deleteField(),
           },
@@ -364,8 +425,6 @@ export default function App() {
 
     return () => unsub();
   }, []);
-
-  
 
   // 2) live user doc
   useEffect(() => {
@@ -389,29 +448,123 @@ export default function App() {
     await signOut(auth);
   }
 
-  // ✅ NEW: wait for initial auth state before showing logged-out or routes
+  // If we just submitted ratings, clear the banner immediately
+  useEffect(() => {
+    const ratedId = location.state?.ratedProjectId;
+    if (!ratedId) return;
+
+    setRatingNotice((prev) => (prev?.projectId === ratedId ? null : prev));
+  }, [location.state]);
+
+  // ✅ Check pending ratings (skip dismissed) and re-check on navigation
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    let cancelled = false;
+
+    async function checkPendingRatings() {
+      try {
+        const dismissedMap = userData?.ratingDismissed || {};
+
+        const q = query(
+          collection(db, "projects"),
+          where("memberUids", "array-contains", user.uid),
+          where("status", "==", "completed")
+        );
+
+        const snap = await getDocs(q);
+        if (cancelled) return;
+
+        for (const d of snap.docs) {
+          const projectId = d.id;
+          const proj = d.data();
+
+          // skip dismissed
+          if (dismissedMap && dismissedMap[projectId]) continue;
+
+          const ratingSnap = await getDoc(doc(db, "projectRatings", projectId));
+          if (!ratingSnap.exists()) continue;
+
+          const ratingData = ratingSnap.data();
+          if ((ratingData.status || "open") !== "open") continue;
+
+          const subSnap = await getDoc(doc(db, "projectRatings", projectId, "submissions", user.uid));
+          if (subSnap.exists()) continue;
+
+          if (!cancelled) {
+            setRatingNotice({ projectId, projectName: proj.name || "Project" });
+          }
+          return; // show one notice only
+        }
+
+        if (!cancelled) setRatingNotice(null);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setRatingNotice(null);
+      }
+    }
+
+    checkPendingRatings();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.uid, userData?.ratingDismissed, location.key]);
+
+  async function dismissNotice() {
+    if (!user?.uid || !ratingNotice?.projectId) {
+      setRatingNotice(null);
+      return;
+    }
+
+    const pid = ratingNotice.projectId;
+
+    // 1) hide immediately in UI
+    setRatingNotice(null);
+
+    // 2) persist dismissal in Firestore so it won't pop again
+    try {
+      await updateDoc(doc(db, "users", user.uid), {
+        [`ratingDismissed.${pid}`]: serverTimestamp(),
+      });
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function rateNow() {
+    if (!ratingNotice?.projectId) return;
+    navigate(`/rate/${ratingNotice.projectId}`);
+  }
+
   if (!authReady) return <LoadingState />;
   if (!user) return <LoggedOutView onLogin={handleLogin} />;
   if (loadingProfile) return <LoadingState />;
 
   return (
     <Routes>
-      {/* Root route: render Home directly to avoid extra redirect flashes */}
       <Route path="/" element={<Navigate to="/home" replace />} />
 
-      {/* Logged-in shell */}
       <Route
         element={
-          <LoggedInLayout user={user} userData={userData} profileReady={profileReady} onLogout={handleLogout} />
+          <LoggedInLayout
+            user={user}
+            userData={userData}
+            profileReady={profileReady}
+            onLogout={handleLogout}
+            ratingNotice={ratingNotice}
+            onRateNow={rateNow}
+            onDismissRating={dismissNotice}
+          />
         }
       >
         <Route path="/home" element={<HomeRoute />} />
         <Route path="/profile" element={<ProfileRoute />} />
         <Route path="/projects" element={<ProjectsRoute />} />
         <Route path="/messages" element={<MessagesRoute />} />
+        <Route path="/rate/:projectId" element={<RatingRoute />} />
       </Route>
 
-      {/* Fallback */}
       <Route path="*" element={<Navigate to="/home" replace />} />
     </Routes>
   );

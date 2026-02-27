@@ -6,6 +6,8 @@ import {
   arrayUnion,
   collection,
   doc,
+  getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -23,17 +25,22 @@ export default function MessagesPage({ user }) {
   const [tab, setTab] = useState("messages"); // "messages" | "inbox"
 
   const [myUsername, setMyUsername] = useState("");
-  const [people, setPeople] = useState([]);
   const [activeUid, setActiveUid] = useState(null);
   const [messages, setMessages] = useState([]);
   const [text, setText] = useState("");
   const endRef = useRef(null);
+
+  // ✅ NEW: search state
+  const [search, setSearch] = useState("");
+  const [searchResults, setSearchResults] = useState([]);
+  const [searching, setSearching] = useState(false);
 
   // Inbox state
   const [incoming, setIncoming] = useState([]); // toUid == me
   const [outgoing, setOutgoing] = useState([]); // fromUid == me
   const [inboxStatus, setInboxStatus] = useState("");
 
+  // 1) get my username (for message meta)
   useEffect(() => {
     if (!user) return;
 
@@ -42,26 +49,75 @@ export default function MessagesPage({ user }) {
       setMyUsername(snap.data()?.profile?.username || "");
     });
 
-    const unsubPeople = onSnapshot(collection(db, "users"), (snap) => {
-      const list = snap.docs
-        .map((d) => ({ id: d.id, ...d.data() }))
-        .filter((u) => u.id !== user.uid && u.profile?.username);
-
-      setPeople(list);
-      if (!activeUid && list.length) setActiveUid(list[0].id);
-    });
-
-    return () => {
-      unsubMe();
-      unsubPeople();
-    };
-    // ✅ do NOT include activeUid here, it causes unnecessary re-subscribes
+    return () => unsubMe();
   }, [user]);
 
-  const activeUser = useMemo(() => people.find((p) => p.id === activeUid) || null, [people, activeUid]);
-  const chatId = useMemo(() => (activeUid ? makeChatId(user.uid, activeUid) : null), [user.uid, activeUid]);
+  // 2) ✅ Search users by usernameLower (no more listing everyone)
+  useEffect(() => {
+    if (!user) return;
 
-  // Real-time messages for selected chat
+    const term = search.trim().toLowerCase();
+
+    // empty → show nothing (prevents showing all users)
+    if (!term) {
+      setSearchResults([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function run() {
+      try {
+        setSearching(true);
+
+        const q = query(
+          collection(db, "users"),
+          where("profile.usernameLower", ">=", term),
+          where("profile.usernameLower", "<=", term + "\uf8ff"),
+          limit(20)
+        );
+
+        const snap = await getDocs(q);
+        if (cancelled) return;
+
+        const list = snap.docs
+          .map((d) => ({ id: d.id, ...d.data() }))
+          .filter((u) => u.id !== user.uid && u.profile?.username);
+
+        setSearchResults(list);
+
+        // auto-select first result if nothing selected yet
+        if (!activeUid && list.length) setActiveUid(list[0].id);
+      } catch (e) {
+        console.error(e);
+        if (!cancelled) setSearchResults([]);
+      } finally {
+        if (!cancelled) setSearching(false);
+      }
+    }
+
+    // small debounce
+    const t = setTimeout(run, 250);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // ✅ do NOT include activeUid; we only read it once to auto-select
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, search]);
+
+  const activeUser = useMemo(
+    () => searchResults.find((p) => p.id === activeUid) || null,
+    [searchResults, activeUid]
+  );
+
+  const chatId = useMemo(() => {
+    if (!user?.uid || !activeUid) return null;
+    return makeChatId(user.uid, activeUid);
+  }, [user?.uid, activeUid]);
+
+  // 3) Real-time messages for selected chat
   useEffect(() => {
     if (!chatId) return;
     const q = query(collection(db, "chats", chatId, "messages"), orderBy("createdAt", "asc"));
@@ -72,7 +128,8 @@ export default function MessagesPage({ user }) {
     return () => unsub();
   }, [chatId]);
 
-  // Inbox listeners
+  // 4) Inbox listeners (incoming + outgoing)
+  // NOTE: you already created the indexes. Keep orderBy.
   useEffect(() => {
     if (!user) return;
 
@@ -101,9 +158,10 @@ export default function MessagesPage({ user }) {
   }, [user]);
 
   async function send() {
-    if (!text.trim() || !chatId || !activeUser) return;
+    if (!text.trim() || !chatId || !activeUser || !user) return;
 
     const messageText = text.trim();
+
     const payload = {
       text: messageText,
       createdAt: serverTimestamp(),
@@ -135,6 +193,12 @@ export default function MessagesPage({ user }) {
     try {
       setInboxStatus("Accepting...");
 
+      // Safety guard
+      if (req.toUid !== user.uid || req.status !== "pending") {
+        setInboxStatus("This request is no longer pending.");
+        return;
+      }
+
       // 1) mark request accepted
       await updateDoc(doc(db, "connectionRequests", req.id), {
         status: "accepted",
@@ -157,6 +221,12 @@ export default function MessagesPage({ user }) {
   async function rejectRequest(req) {
     try {
       setInboxStatus("Rejecting...");
+
+      // Safety guard
+      if (req.toUid !== user.uid || req.status !== "pending") {
+        setInboxStatus("This request is no longer pending.");
+        return;
+      }
 
       await updateDoc(doc(db, "connectionRequests", req.id), {
         status: "rejected",
@@ -194,14 +264,49 @@ export default function MessagesPage({ user }) {
               Connection requests & history
             </p>
           )}
-          {tab === "messages" && <p className="tf-muted tf-small">Select a user to chat</p>}
+
+          {tab === "messages" && (
+            <>
+              <p className="tf-muted tf-small" style={{ marginTop: 8 }}>
+                Search by username
+              </p>
+
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Type username (e.g. daphne)"
+                style={{
+                  width: "100%",
+                  marginTop: 8,
+                  padding: "10px 12px",
+                  borderRadius: 12,
+                  border: "1px solid rgba(0,0,0,.12)",
+                }}
+              />
+
+              {searching && (
+                <p className="tf-muted tf-small" style={{ marginTop: 8 }}>
+                  Searching...
+                </p>
+              )}
+
+              {search.trim() === "" && (
+                <p className="tf-muted tf-small" style={{ marginTop: 8 }}>
+                  Start typing to search users.
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         <div className="tf-chat-list-body">
           {tab === "messages" && (
             <>
-              {people.length === 0 && <p className="tf-muted">No users found yet.</p>}
-              {people.map((p) => (
+              {search.trim() !== "" && searchResults.length === 0 && !searching && (
+                <p className="tf-muted">No users found.</p>
+              )}
+
+              {searchResults.map((p) => (
                 <button
                   key={p.id}
                   className={`tf-chat-person ${p.id === activeUid ? "is-active" : ""}`}
@@ -308,13 +413,15 @@ export default function MessagesPage({ user }) {
                 <div className="tf-chat-thread-title">
                   {activeUser ? activeUser.profile?.fullName || activeUser.profile?.username : ""}
                 </div>
-                <div className="tf-muted tf-small">{activeUser ? `@${activeUser.profile?.username}` : ""}</div>
+                <div className="tf-muted tf-small">
+                  {activeUser ? `@${activeUser.profile?.username}` : ""}
+                </div>
               </div>
             </header>
 
             <div className="tf-chat-thread-body">
               {!activeUser ? (
-                <p className="tf-muted">Select a user to start chatting.</p>
+                <p className="tf-muted">Search and select a user to start chatting.</p>
               ) : (
                 <>
                   {messages.map((m) => {
@@ -337,7 +444,7 @@ export default function MessagesPage({ user }) {
               <input
                 value={text}
                 onChange={(e) => setText(e.target.value)}
-                placeholder={activeUser ? `Message @${activeUser.profile?.username}` : "Select a user"}
+                placeholder={activeUser ? `Message @${activeUser.profile?.username}` : "Search a user first"}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") send();
                 }}
@@ -348,7 +455,7 @@ export default function MessagesPage({ user }) {
               </button>
             </footer>
           </>
-        ) : null /* ✅ removed the Inbox placeholder box */}
+        ) : null}
       </section>
     </div>
   );

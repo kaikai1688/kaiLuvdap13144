@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { db } from "./firebase";
+import { runAdminAggregationForProject } from "./adminCompute";
 import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
 
 const TRAITS = [
@@ -130,7 +131,7 @@ export default function RatingPage({ user }) {
         if (cancelled) return;
         setMembers(people);
 
-        // ✅ 3) Block rating if not ended
+        // 3) Block rating if not ended
         if ((proj.status || "current") !== "completed") {
           setRatings({});
           setStatus(
@@ -205,10 +206,11 @@ export default function RatingPage({ user }) {
   }
 
   async function submit() {
+    console.log("SUBMIT clicked", { projectId, uid: user.uid });
     if (!user || !projectId) return;
     if (!project) return;
 
-    // ✅ Hard block
+    // Hard block
     if ((project.status || "current") !== "completed") {
       setStatus("Project not ended yet. You cannot submit ratings now.");
       return;
@@ -229,7 +231,6 @@ export default function RatingPage({ user }) {
       return;
     }
 
-    // ✅ confirm before submit
     const ok = window.confirm("Confirm submit your ratings? You can edit later if needed.");
     if (!ok) return;
 
@@ -239,6 +240,7 @@ export default function RatingPage({ user }) {
 
       const subRef = doc(db, "projectRatings", projectId, "submissions", user.uid);
 
+      // 1) Save submission
       await setDoc(
         subRef,
         {
@@ -248,15 +250,29 @@ export default function RatingPage({ user }) {
         },
         { merge: true }
       );
+      console.log("SUBMIT saved to Firestore", subRef.path);
 
-      // ✅ redirect back and tell App which project was rated
-      nav("/projects", {
-        replace: true,
-        state: {
-          toast: "Ratings saved! Thanks for rating!",
-          ratedProjectId: projectId,
-        },
-      });
+      // 2) Run admin aggregation (admin only). Non-admin will be skipped inside.
+      try {
+        setStatus("Ratings saved ✅ Running aggregation (admin only)...");
+        const res = await runAdminAggregationForProject({
+          projectId,
+          currentUid: user.uid,
+        });
+
+        if (res?.ok) {
+          setStatus("Ratings saved ✅ Aggregation done ✅");
+        } else {
+          setStatus("Ratings saved ✅ (Aggregation skipped: not admin)");
+        }
+      } catch (aggErr) {
+        console.error(aggErr);
+        setStatus("Ratings saved ✅ (Aggregation failed, but rating saved.)");
+      }
+
+      // 3) Redirect back to Projects with toast
+     setStatus("Saved ✅ Please check Firestore: projectRatings > thisProject > submissions > yourUid");
+return;
     } catch (e) {
       console.error(e);
       setStatus(e?.message || "Submit failed. Check rules/permissions.");
@@ -287,7 +303,11 @@ export default function RatingPage({ user }) {
           <p className="tf-muted" style={{ marginTop: 10 }}>
             This project has NOT ended yet. Rating is locked until the owner clicks <b>End Project</b>.
           </p>
-          {status && <p className="tf-muted" style={{ marginTop: 10 }}>{status}</p>}
+          {status && (
+            <p className="tf-muted" style={{ marginTop: 10 }}>
+              {status}
+            </p>
+          )}
           <div className="tf-inline-actions" style={{ marginTop: 14 }}>
             <button className="tf-btn" onClick={() => nav("/projects")}>
               Back to Projects
@@ -296,9 +316,7 @@ export default function RatingPage({ user }) {
         </>
       ) : (
         <>
-          <p className="tf-muted">
-            Please rate each teammate using 1–5 stars for all 7 traits.
-          </p>
+          <p className="tf-muted">Please rate each teammate using 1–5 stars for all 7 traits.</p>
 
           <div style={{ display: "grid", gap: 16, marginTop: 12 }}>
             {targets.map((t) => (
@@ -342,7 +360,11 @@ export default function RatingPage({ user }) {
             </button>
           </div>
 
-          {status && <p className="tf-muted" style={{ marginTop: 10 }}>{status}</p>}
+          {status && (
+            <p className="tf-muted" style={{ marginTop: 10 }}>
+              {status}
+            </p>
+          )}
         </>
       )}
     </div>

@@ -6,7 +6,6 @@ import {
   arrayUnion,
   collection,
   doc,
-  getDoc,
   onSnapshot,
   orderBy,
   query,
@@ -47,6 +46,7 @@ export default function MessagesPage({ user }) {
       const list = snap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((u) => u.id !== user.uid && u.profile?.username);
+
       setPeople(list);
       if (!activeUid && list.length) setActiveUid(list[0].id);
     });
@@ -55,7 +55,8 @@ export default function MessagesPage({ user }) {
       unsubMe();
       unsubPeople();
     };
-  }, [user, activeUid]);
+    // ✅ do NOT include activeUid here, it causes unnecessary re-subscribes
+  }, [user]);
 
   const activeUser = useMemo(() => people.find((p) => p.id === activeUid) || null, [people, activeUid]);
   const chatId = useMemo(() => (activeUid ? makeChatId(user.uid, activeUid) : null), [user.uid, activeUid]);
@@ -347,12 +348,7 @@ export default function MessagesPage({ user }) {
               </button>
             </footer>
           </>
-        ) : (
-          <div style={{ padding: 16 }}>
-            <h3 style={{ marginTop: 0 }}>Inbox</h3>
-            <p className="tf-muted">Use the left panel to view requests.</p>
-          </div>
-        )}
+        ) : null /* ✅ removed the Inbox placeholder box */}
       </section>
     </div>
   );

@@ -1,193 +1,142 @@
-# TeamFit — Hackathon MVP (React + Firebase + Prototype Gemini)
+# TeamFit — Student Team Matching & Peer Rating (Hackathon MVP)
 
-TeamFit is a browser-based web app to help students form better teams for group assignments / FYP by matching workstyle traits, supporting connection requests, real-time chat, and peer ratings.
+TeamFit is a web app that helps university students form better teams for **FYP / group assignments / hackathons** by matching teammates using **workstyle compatibility** and **peer ratings** after projects.
 
-✅ **Current implementation is serverless (no custom backend)**  
-- Frontend: **React 19 + Vite + React Router**  
-- Backend services: **Firebase Authentication + Cloud Firestore + Firestore Security Rules**  
-- Deployment: **Firebase Hosting (static web app)**  
-- AI (prototype only): **Google Gemini API via `@google/genai` called from the client**
-
----
-
-## Tech Stack (What’s inside this repo)
-
-### Frontend
-- **React 19** (SPA UI)
-- **React Router DOM** (routing & navigation)
-- **Vite** (dev server, build, HMR)
-- **ESLint** (linting)
-
-### Google Developer Technologies
-- **Firebase Authentication**
-  - Google Sign-In via `signInWithPopup(auth, googleProvider)`
-  - Session tracking via `onAuthStateChanged(auth, ...)`
-  - Sign out via `signOut(auth)`
-- **Cloud Firestore**
-  - Main database for users/projects/requests/messages/ratings/models/config
-  - Real-time updates using `onSnapshot(...)`
-- **Firestore Security Rules**
-  - Acts as “backend-style access control” since Firestore is accessed directly by the client
-- **Firebase Hosting**
-  - Hosts the production build (`dist/`) as a static SPA
-
-### AI (Prototype)
-- **Google Gemini API** (prototype / client-side)
-  - Implemented using **`@google/genai`**
-  - API key provided through **Vite environment variable**: `VITE_GEMINI_API_KEY`
-  - ⚠️ Prototype only: for production, move Gemini calls behind **Cloud Run / Cloud Functions** to protect keys and control cost
+This MVP is designed for fast hackathon delivery:
+- **No custom backend server**
+- Uses **Firebase Authentication + Cloud Firestore** directly from the React client
+- Includes a **Gemini Advisor prototype** (client-side only)
 
 ---
 
-## Current Architecture (Judge-friendly summary)
+## 🌟 Key Features
 
-### 1) React SPA (Browser)
-Users interact with a single-page application. Routing is handled by React Router (`BrowserRouter` in `src/main.jsx`). Core route layout and navigation is in `src/App.jsx`.
+### 1) Google Login (Firebase Auth)
+- Sign in with Google using Firebase Authentication
+- Each user is identified by a unique Firebase **UID**, used across the app and Firestore rules
 
-### 2) Authentication (Firebase Auth)
-User logs in with Google. Firebase returns a signed-in session and a UID (`request.auth.uid`) which is used for access control in Firestore rules.
+### 2) Profile + Assessment (7 Collaboration Traits)
+Users complete:
+- Profile info (name, username, university, course, year)
+- 7 trait ratings (1–5 scale):
+  - Communication
+  - Conflict Handling
+  - Awareness
+  - Supportiveness
+  - Adaptability
+  - Alignment
+  - Trustworthiness
 
-### 3) Database (Cloud Firestore)
-The React app directly reads/writes Firestore using the Firebase Web SDK. Real-time features are implemented using `onSnapshot` listeners.
+### 3) Project Creation + Teammate Matching
+Users can create a project with:
+- project name
+- project type
+- team size
+- due date
 
-### 4) Security (Firestore Rules)
-Firestore Security Rules validate each read/write (signed-in check, ownership checks, admin checks, project membership checks).
+Matching logic:
+- Calculates a compatibility score between users based on the 7 traits
+- Uses a weighted method that prioritizes “Top 3 priority traits” for each project bucket (project type + term)
+- Shows recommended teammates and allows sending **connect requests**
 
-### 5) AI (Gemini prototype only)
-Gemini is not part of the backend. In this build, Gemini calls (if enabled) happen from the browser via `@google/genai` using a Vite client env key.
+### 4) Connection Requests + Inbox Status
+- Users can send connect requests to a candidate for a specific project
+- Project Inbox shows status:
+  - pending
+  - accepted
+  - rejected
 
----
+### 5) Chat Messaging (Firestore)
+- Messaging is stored in Firestore under chat threads
+- Supports direct chat + message persistence
 
-## Repository Structure (Key files)
-public/
-vite.svg
+### 6) End Project → Teammate Rating Flow
+- Project owner clicks **End Project**
+- This opens a rating session for all members
+- Each member rates teammates across all 7 traits
+- Submissions are stored under `projectRatings/{projectId}/submissions/{uid}`
+- Includes quorum logic and session close/expire structure (MVP approach)
 
-src/
-main.jsx # React entry + BrowserRouter
-App.jsx # Routes + auth/session + main UI layout
-firebase.js # Firebase init: Auth + Firestore
-HomePage.jsx
-ProfilePage.jsx
-AssessmentPage.jsx
-ProjectsPage.jsx
-CreateProjectPage.jsx
-MessagesPage.jsx
-RatingPage.jsx
-RequireReady.jsx
-adminCompute.js # admin logic / helper tooling (also references Gemini prototype usage)
-AppShell.css / App.css / index.css / Login.css
-
-vite.config.js
-package.json
-.firebaserc # points to Firebase project "teamfit-2d658"
-
-
----
-
-## Firestore Data Model (Collections used)
-
-The app uses these Firestore collections / subcollections:
-
-- `users/{uid}`
-  - `traitHistory/{projectId}`
-- `projects/{projectId}`
-- `connectionRequests/{rid}`
-- `chats/{chatId}`
-  - `messages/{messageId}`
-- `projectRatings/{projectId}`
-  - `submissions/{raterUid}`
-- `traitModels/{bucketId}`
-- `config/admins`
+### 7) Gemini Advisor (Prototype Only)
+- Provides short “advisor” text output during teammate matching (3–6 lines)
+- **Model used:** `gemini-2.5-flash`
+- Implemented using `@google/genai` and `VITE_GEMINI_API_KEY`
+- ⚠️ Prototype runs client-side (not backend-secured)
 
 ---
 
-## Security Rules Summary (High level)
+## 🏗️ Technical Architecture (Current Build)
 
-Your rules follow these principles:
+**Frontend (React + Vite SPA)**
+- Routing via `react-router-dom`
+- Main pages:
+  - Home
+  - Profile
+  - Assessment
+  - Projects
+  - Messages
+  - Rating
 
-- **Default deny** for everything not explicitly allowed:
-  - `match /{document=**} { allow read, write: if false; }`
-- **Signed-in gating**: most reads/writes require `request.auth != null`
-- **Admin access** is controlled by:
-  - `config/admins.adminMap[uid] == true`
-- **Ownership checks** are applied for:
-  - `users/{uid}` updates/deletes
-  - `connectionRequests` (sender creates, receiver updates, only parties read)
-  - `projectRatings/submissions` (only rater writes own submission)
-- ⚠️ Note for hackathon MVP: `projects` and `chats` currently allow `read/write` for any signed-in user. This is acceptable for MVP speed, but should be tightened for production.
+**Backend Services (Firebase)**
+- **Firebase Authentication (Google Sign-In)**
+- **Cloud Firestore (database + real-time listeners)**  
+  Used directly from the frontend via Firebase Web SDK (`getDoc`, `setDoc`, `updateDoc`, `getDocs`, `onSnapshot`, etc.)
+
+**AI (Prototype)**
+- Gemini called directly from the client (no Cloud Run / Functions pipeline in this MVP)
+
+**Deployment**
+- Firebase Hosting (static hosting for Vite build output)
 
 ---
 
-## Getting Started (Local Development)
+## 🗃️ Firestore Data Model (Collections)
+
+TeamFit stores data in these collections:
+
+- `users/{uid}` — user profile + assessment traits + status flags  
+- `projects/{projectId}` — projects (owner, members, type, due date, status)  
+- `connectionRequests/{rid}` — project-based connection requests (pending/accepted/rejected)  
+- `chats/{chatId}/messages/{messageId}` — chat threads + message history  
+- `projectRatings/{projectId}` — rating sessions  
+  - `projectRatings/{projectId}/submissions/{uid}` — each user’s rating submission  
+- `traitModels/{bucketId}` — bucket model for “Top 3 priority traits”  
+- `config/admins` — adminMap for admin privileges
+
+---
+
+## 🔐 Security (Firestore Rules Summary)
+
+Since the MVP has no custom backend server, Firestore Security Rules act as the backend enforcement layer.
+
+Key logic (high-level):
+- Require signed-in users (`request.auth != null`)
+- Admin role is controlled via `config/admins.adminMap[uid]`
+- Project membership is checked via `projects/{projectId}.memberUids`
+- Connection requests:
+  - Sender creates
+  - Receiver updates
+  - Only sender/receiver can read
+- Ratings:
+  - Only project members can read/write rating session & submissions
+  - Only rater can write their own submission document
+
+(Full rules are in `firestore.rules`.)
+
+---
+
+## ⚙️ Local Setup (Beginner Steps)
 
 ### 1) Install dependencies
 ```bash
 npm install
-2) Run the app
-npm run dev
-3) Build for production
-npm run build
-npm run preview
 
-Environment Variables (Gemini prototype)
+### 2) Run the app locally
+```bash
+npm install
 
-Create a .env file at project root:
-VITE_GEMINI_API_KEY=YOUR_GEMINI_KEY
-⚠️ Important: Vite exposes VITE_* variables to the browser.
-This is okay for prototype/demo, but for production you should move Gemini calls behind Cloud Run/Functions.
+3) Save `README.md`.
 
-Firebase Setup (Using your own project)
+That’s it.
 
-This repo initializes Firebase in src/firebase.js:
-
-initializeApp(firebaseConfig)
-
-getAuth(app) + GoogleAuthProvider()
-
-getFirestore(app)
-
-To use your own Firebase project:
-
-Create a Firebase project
-
-Enable Authentication → Google
-
-Create Firestore Database
-
-Replace firebaseConfig in src/firebase.js with your Firebase web config
-
-Deployment (Firebase Hosting)
-
-Typical hosting flow:
-npm run build
-firebase init hosting
-firebase deploy
-
-You should configure Hosting to serve the Vite build output folder:
-
-dist/
-
-FAQ
-What is node_modules/? Should it be in the diagram?
-
-node_modules/ is where NPM stores installed libraries (React, Firebase SDK, etc.).
-
-✅ Do not include it in architecture diagrams (it’s not a system component)
-
-✅ Do not commit it to GitHub (keep it in .gitignore)
-
-Do you have a backend server?
-
-Not in the current implementation. Firebase managed services act as the backend:
-
-Firebase Auth
-
-Cloud Firestore
-
-Firestore Security Rules
-
-License
-
-Hackathon / educational use.
-
-If you paste your **`firebase.json`** + confirm whether you already ran `firebase init hosting`, I can make the **Deployment section 100% exact** (what folder you deploy, SPA rewrites, and commands that will work on judges’ machines).
+If your README already has a section like `## Getting Started`, just paste this **under that header** and delete the duplicated `npm install` in the run step.

@@ -127,16 +127,113 @@ Key logic (high-level):
 
 ## ⚙️ Local Setup (Beginner Steps)
 
-### 1) Install dependencies
-```bash
+## 1) Install dependencies
 npm install
+## 2) Run the dev server
+npm run dev
 
-### 2) Run the app locally
-```bash
-npm install
+Vite will show a local URL (usually http://localhost:5173).
 
-3) Save `README.md`.
+## 3) Build for production
+npm run build
+## 4) Preview the production build locally
+npm run preview
+Environment Variables (Gemini Prototype)
 
-That’s it.
+Create a .env file in the project root (same folder level as package.json):
 
-If your README already has a section like `## Getting Started`, just paste this **under that header** and delete the duplicated `npm install` in the run step.
+VITE_GEMINI_API_KEY=your_key_here
+
+If VITE_GEMINI_API_KEY is missing, your app should fall back to a default advisor message (recommended for demos).
+
+## Firebase Setup (How to run your own copy)
+## A) Create Firebase project
+
+Go to Firebase Console → Create project
+
+Enable Authentication → Google sign-in provider
+
+Create Cloud Firestore database
+
+## B) Add your Firebase config
+
+Update src/firebase.js with your own project settings from:
+Firebase Console → Project settings → Web app
+
+⚠️ Don’t commit private keys meant for servers.
+Firebase web config is okay to be public, but your Gemini key should be kept in .env.
+
+## Firestore Security Rules (Summary)
+
+Your rules follow these key ideas:
+
+Default deny for unknown collections:
+
+match /{document=**} { allow read, write: if false; }
+
+Signed-in gating: most collections require request.auth != null
+
+Admin role: checked via config/admins.adminMap[uid] == true
+
+Ownership / role-based rules for:
+
+users (owner/admin)
+
+connectionRequests (sender creates, receiver updates)
+
+projectRatings/submissions (only rater can write; project members can read)
+
+Note: projects and chats are currently read/write: if isSignedIn() — good for hackathon speed; tighten to membership-based access for production.
+
+## Scripts
+
+From package.json:
+
+npm run dev       # start Vite dev server
+npm run build     # build production bundle
+npm run preview   # preview production build locally
+npm run lint      # run ESLint
+Project Structure (Important Files)
+
+src/main.jsx — React entry, wraps <App /> with BrowserRouter
+
+src/App.jsx — main routing + auth gate + layout + navigation
+
+src/firebase.js — Firebase initialization (Auth + Firestore)
+
+src/ProfilePage.jsx — user profile + traits
+
+src/ProjectsPage.jsx — browse projects + matching + (prototype) Gemini calls
+
+src/MessagesPage.jsx — chat & messaging (Firestore real-time)
+
+src/RatingPage.jsx — teammate rating submissions
+
+src/adminCompute.js — admin utilities / prototype logic
+
+Deployment (Firebase Hosting)
+
+If you’ve set up Firebase Hosting:
+
+firebase login
+firebase init hosting
+npm run build
+firebase deploy
+Notes for Judges
+
+This is a serverless MVP: the “backend” is Firebase Auth + Firestore + Rules.
+
+Gemini AI is prototype-only (client side) for demo speed and cost control.
+
+## Production upgrade path:
+
+Move Gemini calls behind Cloud Run / Cloud Functions
+
+Tighten Firestore rules for projects/chats/rating membership access
+
+Add indexing + query optimization for scale
+
+License
+
+Hackathon / educational use.
+

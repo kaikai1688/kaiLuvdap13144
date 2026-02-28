@@ -208,6 +208,7 @@ function LoggedInLayout({
   ratingNotice,
   onRateNow,
   onDismissRating,
+  isAdmin
 }) {
   const navigate = useNavigate();
   const location = useLocation();
@@ -253,6 +254,7 @@ function LoggedInLayout({
           </nav>
 
           <div className="tf-actions">
+            {isAdmin && <span className="tf-mini-chip">Admin</span>}
             <ProfileMenu
               user={user}
               onGoProfile={goProfile}
@@ -359,6 +361,9 @@ export default function App() {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [isAdmin, setIsAdmin] = useState(false);
+  
+
   const [user, setUser] = useState(null);
   const [authReady, setAuthReady] = useState(false);
 
@@ -440,6 +445,31 @@ export default function App() {
     return () => unsub();
   }, [user]);
 
+  useEffect(() => {
+  if (!user?.uid) {
+    setIsAdmin(false);
+    return;
+  }
+
+  let cancelled = false;
+
+  async function check() {
+    try {
+      const snap = await getDoc(doc(db, "config", "admins"));
+      const ok = snap.exists() && snap.data()?.adminMap?.[user.uid] === true;
+      if (!cancelled) setIsAdmin(ok);
+    } catch (e) {
+      console.error(e);
+      if (!cancelled) setIsAdmin(false);
+    }
+  }
+
+  check();
+  return () => {
+    cancelled = true;
+  };
+}, [user?.uid]);
+
   const profileReady = useMemo(() => {
     const p = userData?.profile;
     return Boolean(p?.fullName && p?.username && p?.university && p?.course && p?.yearOfStudy);
@@ -491,21 +521,48 @@ export default function App() {
           // skip dismissed
           if (dismissedMap && dismissedMap[projectId]) continue;
 
-          const ratingSnap = await getDoc(doc(db, "projectRatings", projectId));
-          if (!ratingSnap.exists()) continue;
+         const ratingRef = doc(db, "projectRatings", projectId);
+const ratingSnap = await getDoc(ratingRef);
+if (!ratingSnap.exists()) continue;
 
-          const ratingData = ratingSnap.data();
-          if ((ratingData.status || "open") !== "open") continue;
+const ratingData = ratingSnap.data();
+const statusNow = String(ratingData.status || "open");
 
-          const subSnap = await getDoc(
-            doc(db, "projectRatings", projectId, "submissions", user.uid)
-          );
-          if (subSnap.exists()) continue;
+// If already closed/expired, skip
+if (statusNow !== "open") continue;
 
-          if (!cancelled) {
-            setRatingNotice({ projectId, projectName: proj.name || "Project" });
-          }
-          return; // show one notice only
+// --- Expiry check: if past closeAt and not enough submissions, expire it ---
+try {
+  const closeAt = ratingData.closeAt?.toDate ? ratingData.closeAt.toDate() : null;
+  const minSubmissions = Number(ratingData.minSubmissions || 0);
+
+  if (closeAt && Date.now() > closeAt.getTime() && minSubmissions > 0) {
+    const subsSnap = await getDocs(collection(db, "projectRatings", projectId, "submissions"));
+    const submissionsCount = subsSnap.size;
+
+    if (submissionsCount < minSubmissions) {
+      // Mark expired so it won’t nag forever
+      await updateDoc(ratingRef, {
+        status: "expired",
+        expiredAt: serverTimestamp(),
+        expiredReason: `Not enough submissions (${submissionsCount}/${minSubmissions}) before closeAt`,
+      });
+      continue; // do not show banner
+    }
+  }
+} catch (e) {
+  console.error("Expiry check failed:", e);
+}
+
+// If user already submitted, skip
+const subSnap = await getDoc(doc(db, "projectRatings", projectId, "submissions", user.uid));
+if (subSnap.exists()) continue;
+
+// Otherwise show banner
+if (!cancelled) {
+  setRatingNotice({ projectId, projectName: proj.name || "Project" });
+}
+return;
         }
 
         if (!cancelled) setRatingNotice(null);
@@ -515,11 +572,15 @@ export default function App() {
       }
     }
 
-    checkPendingRatings();
+checkPendingRatings();
 
-    return () => {
-      cancelled = true;
-    };
+// ✅ re-check periodically so closeAt expiry happens even if user stays on same page
+const intervalId = setInterval(checkPendingRatings, 60_000); // every 60 seconds
+
+return () => {
+  cancelled = true;
+  clearInterval(intervalId);
+};
   }, [user?.uid, userData?.ratingDismissed, location.key]);
 
   async function dismissNotice() {
@@ -566,6 +627,7 @@ export default function App() {
             ratingNotice={ratingNotice}
             onRateNow={rateNow}
             onDismissRating={dismissNotice}
+            isAdmin={isAdmin}
           />
         }
       >

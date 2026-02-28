@@ -25,7 +25,9 @@ const TRAITS = [
 
 function computeTop3ByAverage(bucketTraitAverages = {}) {
   return [...TRAITS]
-    .sort((a, b) => Number(bucketTraitAverages[b] || 0) - Number(bucketTraitAverages[a] || 0))
+    .sort(
+      (a, b) => Number(bucketTraitAverages[b] || 0) - Number(bucketTraitAverages[a] || 0)
+    )
     .slice(0, 3);
 }
 
@@ -60,11 +62,13 @@ No markdown. JSON only.
 
   const text =
     (resp?.text || resp?.candidates?.[0]?.content?.parts?.[0]?.text || "").trim();
+
   if (!text) return null;
 
   try {
     const parsed = JSON.parse(text);
     const topTraits = Array.isArray(parsed.topTraits) ? parsed.topTraits : null;
+
     if (!topTraits || topTraits.length !== 3) return null;
     if (!topTraits.every((t) => TRAITS.includes(t))) return null;
 
@@ -161,6 +165,7 @@ export async function runAdminAggregationForProject({ projectId, currentUid }) {
           },
           { merge: true }
         );
+        console.log("AGG: traitHistory write SUCCESS for uid =", uid);
 
         // Load last 3 histories
         const lastQ = query(
@@ -210,6 +215,7 @@ export async function runAdminAggregationForProject({ projectId, currentUid }) {
           },
           { merge: true }
         );
+        console.log("AGG: user traitsFinal write SUCCESS for uid =", uid);
       } catch (err) {
         console.error("AGG: failed writing for uid =", uid, err);
         // continue to next uid
@@ -230,11 +236,22 @@ export async function runAdminAggregationForProject({ projectId, currentUid }) {
       }
     }
     if (memberCount > 0) {
-      for (const trait of TRAITS) bucketTraitAverages[trait] = bucketTraitAverages[trait] / memberCount;
+      for (const trait of TRAITS) {
+        bucketTraitAverages[trait] = bucketTraitAverages[trait] / memberCount;
+      }
     }
 
     const bucketId = `${projectType}__${term}`;
-    const gem = await geminiPickTop3({ projectType, term, bucketTraitAverages });
+
+    // ✅ Gemini must NEVER crash aggregation
+    let gem = null;
+    try {
+      gem = await geminiPickTop3({ projectType, term, bucketTraitAverages });
+    } catch (e) {
+      console.warn("Gemini failed, using fallback:", e?.message || e);
+      gem = null;
+    }
+
     const topTraits = gem?.topTraits || computeTop3ByAverage(bucketTraitAverages);
 
     console.log("AGG: writing traitModels bucketId =", bucketId);
@@ -246,7 +263,7 @@ export async function runAdminAggregationForProject({ projectId, currentUid }) {
         term,
         topTraits,
         bucketTraitAverages,
-        reason: gem?.reason || "Computed by averages (fallback).",
+        reason: gem?.reason || "Computed by averages (Gemini unavailable / fallback).",
         updatedAt: serverTimestamp(),
         computedBy: "frontend-admin",
         computedAt: new Date().toISOString(),
@@ -254,6 +271,7 @@ export async function runAdminAggregationForProject({ projectId, currentUid }) {
       },
       { merge: true }
     );
+    console.log("AGG: traitModels write SUCCESS for bucketId =", bucketId);
 
     // 6) Close rating session (optional)
     await setDoc(

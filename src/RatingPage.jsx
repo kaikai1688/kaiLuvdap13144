@@ -3,7 +3,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { db } from "./firebase";
 import { runAdminAggregationForProject } from "./adminCompute";
-import { doc, getDoc, serverTimestamp, setDoc } from "firebase/firestore";
+
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  serverTimestamp,
+  setDoc,
+  updateDoc,
+} from "firebase/firestore";
+
 
 const TRAITS = [
   ["communication", "Communication"],
@@ -141,20 +151,57 @@ export default function RatingPage({ user }) {
         }
 
         // 4) Ensure rating session exists (only after completed)
-        const term = computeTermFromDueDate(proj.dueDate);
-        await setDoc(
-          doc(db, "projectRatings", projectId),
-          {
-            projectId,
-            projectType: proj.projectType || "",
-            term,
-            memberUids,
-            status: "open",
-            createdAt: serverTimestamp(),
-          },
-          { merge: true }
-        );
+// 4) Ensure rating session exists (only after completed)
+// IMPORTANT: do NOT force status back to "open" if it's already closed/expired.
+const term = computeTermFromDueDate(proj.dueDate);
+const ratingRef = doc(db, "projectRatings", projectId);
+const ratingSnap = await getDoc(ratingRef);
 
+if (!ratingSnap.exists()) {
+  // Create only if missing
+  await setDoc(
+    ratingRef,
+    {
+      projectId,
+      projectType: proj.projectType || "",
+      term,
+      memberUids,
+      status: "open",
+      createdAt: serverTimestamp(),
+    },
+    { merge: true }
+  );
+} else {
+  // If exists, only update metadata — never reopen
+  await setDoc(
+    ratingRef,
+    {
+      projectType: proj.projectType || "",
+      term,
+      memberUids,
+    },
+    { merge: true }
+  );
+}
+
+
+const rsnap = await getDoc(doc(db, "projectRatings", projectId));
+if (rsnap.exists()) {
+  const rdata = rsnap.data();
+  const rstatus = String(rdata.status || "open");
+
+  if (rstatus === "expired") {
+    setStatus("Rating session expired. You can no longer submit ratings for this project.");
+    setRatings({});
+    return;
+  }
+
+  if (rstatus === "closed") {
+    // Optional: allow viewing, but no edits
+    setStatus("Rating session closed. Ratings are locked.");
+    // You can still load previous submission if you want, but disable submit later.
+  }
+}
         // 5) Load my existing submission (if any)
         const subRef = doc(db, "projectRatings", projectId, "submissions", user.uid);
         const subSnap = await getDoc(subRef);
@@ -216,6 +263,19 @@ export default function RatingPage({ user }) {
       return;
     }
 
+    const ratingSnap = await getDoc(doc(db, "projectRatings", projectId));
+if (ratingSnap.exists()) {
+  const rstatus = String(ratingSnap.data().status || "open");
+  if (rstatus === "expired") {
+    setStatus("Rating session expired. Submission not allowed.");
+    return;
+  }
+  if (rstatus === "closed") {
+    setStatus("Rating session closed. Submission not allowed.");
+    return;
+  }
+}
+
     if (!project.memberUids?.includes(user.uid)) {
       setStatus("You are not a member of this project.");
       return;
@@ -253,22 +313,70 @@ export default function RatingPage({ user }) {
       console.log("SUBMIT saved to Firestore", subRef.path);
 
       // 2) Run admin aggregation (admin only). Non-admin will be skipped inside.
-      try {
-        setStatus("Ratings saved ✅ Running aggregation (admin only)...");
-        const res = await runAdminAggregationForProject({
-          projectId,
-          currentUid: user.uid,
-        });
+      // 2) Check quorum before running aggregation
+try {
+  const ratingRef = doc(db, "projectRatings", projectId);
+  const ratingSnap = await getDoc(ratingRef);
 
-        if (res?.ok) {
-          setStatus("Ratings saved ✅ Aggregation done ✅");
-        } else {
-          setStatus("Ratings saved ✅ (Aggregation skipped: not admin)");
-        }
-      } catch (aggErr) {
-        console.error(aggErr);
-        setStatus("Ratings saved ✅ (Aggregation failed, but rating saved.)");
-      }
+  if (!ratingSnap.exists()) {
+    setStatus("Ratings saved ✅ (No rating session doc found.)");
+    return;
+  }
+
+  const ratingData = ratingSnap.data();
+  const minSubmissions = Number(ratingData.minSubmissions || 0);
+  const alreadyRan = Boolean(ratingData.aggregationRan);
+  const statusNow = String(ratingData.status || "open");
+
+  // If already closed/expired or aggregation already ran, stop here
+  if (alreadyRan || statusNow !== "open") {
+    setStatus("Ratings saved ✅ (Session already processed.)");
+    return;
+  }
+
+  // Count current submissions
+  const subsSnap = await getDocs(collection(db, "projectRatings", projectId, "submissions"));
+  const submissionsCount = subsSnap.size;
+
+  if (minSubmissions > 0 && submissionsCount < minSubmissions) {
+    setStatus(
+      `Ratings saved ✅ Waiting for more submissions (${submissionsCount}/${minSubmissions}).`
+    );
+    return;
+  }
+
+  // 3) Quorum reached → run aggregation ONCE (admin-only inside)
+  setStatus("Quorum reached ✅ Running aggregation (admin only)...");
+
+  const res = await runAdminAggregationForProject({
+    projectId,
+    currentUid: user.uid,
+  });
+
+  if (res?.ok) {
+    // mark session processed
+    await updateDoc(ratingRef, {
+      aggregationRan: true,
+      aggregatedAt: serverTimestamp(),
+      aggregatedByUid: user.uid,
+      status: "closed",
+      closedAt: serverTimestamp(),
+    });
+
+    setStatus("Ratings saved ✅ Aggregation done ✅ Session closed ✅");
+  } else {
+    // not admin → keep open, don’t mark closed
+    setStatus(
+      "Ratings saved ✅ Quorum reached, but aggregation skipped (not admin). Ask admin to submit/trigger aggregation."
+    );
+  }
+
+  return;
+} catch (aggErr) {
+  console.error(aggErr);
+  setStatus("Ratings saved ✅ (Aggregation check failed, but rating saved.)");
+  return;
+}
 
       // 3) Redirect back to Projects with toast
      setStatus("Saved ✅ Please check Firestore: projectRatings > thisProject > submissions > yourUid");

@@ -216,7 +216,12 @@ export default function ProfilePage({ user, userData }) {
     return () => unsub();
   }, [user]);
 
-  const traits = useMemo(() => userData?.traits || {}, [userData]);
+  const selfTraits = useMemo(() => userData?.traits || {}, [userData]);
+const finalTraits = useMemo(() => userData?.traitsFinal || null, [userData]);
+
+// Use peer-updated traitsFinal if available, else fallback to self traits
+const traits = useMemo(() => finalTraits || selfTraits, [finalTraits, selfTraits]);
+const peerLocked = Boolean(userData?.traitsPeer || userData?.traitsFinal);
 
   const overallAvg = useMemo(() => {
     const sum = TRAITS.reduce((acc, t) => acc + Number(traits[t] || 0), 0);
@@ -385,27 +390,42 @@ export default function ProfilePage({ user, userData }) {
 
             {/* ✅ FIX: make button always clickable */}
             <button
-              type="button"
-              className="tf-btn"
-              onClick={() => setShowAssessment((v) => !v)}
-              style={{ pointerEvents: "auto", position: "relative", zIndex: 10 }}
-            >
-              {showAssessment ? "Hide Assessment" : "Complete Assessment"}
-            </button>
+  type="button"
+  className="tf-btn"
+  onClick={() => {
+    if (peerLocked) return;
+    setShowAssessment((v) => !v);
+  }}
+  disabled={peerLocked}
+  style={{ pointerEvents: "auto", position: "relative", zIndex: 10 }}
+>
+  {peerLocked ? "Assessment Locked" : showAssessment ? "Hide Assessment" : "Complete Assessment"}
+</button>
+
+{peerLocked && (
+  <p className="tf-muted tf-small" style={{ marginTop: 8 }}>
+    Your workstyle score is now determined by peer ratings from completed projects.
+  </p>
+)}
 
             {showAssessment && (
               <div style={{ marginTop: 12, position: "relative", zIndex: 10, pointerEvents: "auto" }}>
                 <AssessmentPage
-                  user={user}
-                  onDone={() => {
-                    setShowAssessment(false);
-                    setStatus("Assessment completed ✅");
-                  }}
-                />
+  user={user}
+  locked={peerLocked}
+  onDone={() => {
+    setShowAssessment(false);
+    setStatus("Assessment completed ✅");
+  }}
+/>
               </div>
             )}
           </>
         )}
+
+        <p className="tf-muted tf-small" style={{ marginTop: -6 }}>
+  Source: <b>{finalTraits ? "Peer-updated (traitsFinal)" : "Self assessment (traits)"}</b>
+</p>
       </section>
 
       <section className="tf-card tf-panel">

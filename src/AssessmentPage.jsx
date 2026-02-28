@@ -12,7 +12,7 @@ const QUESTIONS = [
   ["trustworthiness", "I am reliable with commitments and deadlines."],
 ];
 
-export default function AssessmentPage({ user, onDone }) {
+export default function AssessmentPage({ user, onDone, locked = false }) {
   const [traits, setTraits] = useState({
     communication: 3,
     conflictHandling: 3,
@@ -27,8 +27,12 @@ export default function AssessmentPage({ user, onDone }) {
   const [saving, setSaving] = useState(false);
 
   async function saveAssessment() {
-    if (!user) return;
-    if (saving) return;
+  if (!user) return;
+  if (saving) return;
+  if (locked) {
+    setStatus("Assessment is locked after peer ratings begin.");
+    return;
+  }
 
     try {
       setSaving(true);

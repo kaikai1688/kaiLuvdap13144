@@ -17,6 +17,7 @@ import {
   updateDoc,
   where,
   setDoc,
+  Timestamp,
 } from "firebase/firestore";
 
 const TRAITS = [
@@ -38,17 +39,44 @@ const PROJECT_TYPES = [
   "Studio / Creative",
 ];
 
-function calcCompatibility(traitsA = {}, traitsB = {}) {
-  const sims = TRAITS.map((key) => {
-    const diff = Math.abs(Number(traitsA[key] ?? 0) - Number(traitsB[key] ?? 0));
-    return 1 - diff / 4;
-  });
-  const baseScore = (sims.reduce((a, b) => a + b, 0) / TRAITS.length) * 100;
+function calcCompatibilityWeighted(traitsA = {}, traitsB = {}, topTraits = []) {
+  const topSet = new Set(Array.isArray(topTraits) ? topTraits : []);
 
-  const qualityA = TRAITS.reduce((acc, key) => acc + Number(traitsA[key] ?? 0), 0) / TRAITS.length;
-  const qualityB = TRAITS.reduce((acc, key) => acc + Number(traitsB[key] ?? 0), 0) / TRAITS.length;
+  const WEIGHT_TOP = 1.6;
+  const WEIGHT_NORMAL = 1.0;
+
+  // similarity part (0..1), weighted
+  let simSum = 0;
+  let wSum = 0;
+
+  for (const key of TRAITS) {
+    const diff = Math.abs(Number(traitsA[key] ?? 0) - Number(traitsB[key] ?? 0)); // 0..4
+    const sim = 1 - diff / 4; // 1..0
+
+    const w = topSet.has(key) ? WEIGHT_TOP : WEIGHT_NORMAL;
+    simSum += sim * w;
+    wSum += w;
+  }
+
+  const baseScore = wSum > 0 ? (simSum / wSum) * 100 : 0;
+
+  // quality part (still overall, but slightly favor top traits too)
+  let qa = 0;
+  let qb = 0;
+  let qwSum = 0;
+
+  for (const key of TRAITS) {
+    const w = topSet.has(key) ? WEIGHT_TOP : WEIGHT_NORMAL;
+    qa += Number(traitsA[key] ?? 0) * w;
+    qb += Number(traitsB[key] ?? 0) * w;
+    qwSum += w;
+  }
+
+  const qualityA = qwSum > 0 ? qa / qwSum : 0; // 0..5
+  const qualityB = qwSum > 0 ? qb / qwSum : 0; // 0..5
   const qualityScore = ((qualityA + qualityB) / 2 / 5) * 100;
 
+  // final score (keep your original 60/40 split)
   return Math.round(baseScore * 0.6 + qualityScore * 0.4);
 }
 
@@ -126,6 +154,13 @@ export default function ProjectsPage({ user }) {
   const [myProjects, setMyProjects] = useState([]);
   const [pairedMembers, setPairedMembers] = useState([]);
   const [advisor, setAdvisor] = useState("");
+
+  // ✅ Option 1 UI states
+  const [bucketTopTraits, setBucketTopTraits] = useState([]);
+  const [bucketReason, setBucketReason] = useState("");
+  const [bucketUpdatedAt, setBucketUpdatedAt] = useState(null); // Date or null
+  const [bucketConfidence, setBucketConfidence] = useState("Low");
+  const [modelStatus, setModelStatus] = useState("");
 
   const [activeProjectId, setActiveProjectId] = useState(null);
   const [activeProjectName, setActiveProjectName] = useState("");
@@ -220,8 +255,76 @@ export default function ProjectsPage({ user }) {
     setPairedMembers([]);
     setAdvisor("");
 
+    // ✅ reset model UI (correct place)
+    setBucketTopTraits([]);
+    setBucketReason("");
+    setBucketUpdatedAt(null);
+    setBucketConfidence("Low");
+    setModelStatus("");
+
     try {
       const term = computeTermFromDueDate(form.dueDate);
+
+      // 0) Load bucket model (topTraits) for this projectType + term
+      const bucketId = `${form.projectType}__${term}`;
+      let topTraits = [];
+
+      try {
+        const modelRef = doc(db, "traitModels", bucketId);
+        const modelSnap = await getDoc(modelRef);
+
+        if (!modelSnap.exists()) {
+          setModelStatus(`No model found for ${bucketId}. Trying to auto-create...`);
+
+          await setDoc(
+            modelRef,
+            {
+              bucketId,
+              projectType: form.projectType,
+              term,
+              topTraits: ["communication", "alignment", "trustworthiness"],
+              reason: "Auto-created default (no data yet).",
+              bucketTraitAverages: {},
+              updatedAt: serverTimestamp(),
+              computedBy: "frontend-admin-autocreate",
+              computedVersion: 1,
+            },
+            { merge: true }
+          );
+
+          setModelStatus(`Auto-created model for ${bucketId} ✅`);
+          topTraits = ["communication", "alignment", "trustworthiness"];
+
+          // ✅ set default explanation UI (correct branch)
+          setBucketReason("Auto-created default (no data yet).");
+          setBucketUpdatedAt(new Date());
+          setBucketConfidence("Low");
+        } else {
+          const data = modelSnap.data();
+
+          if (Array.isArray(data.topTraits) && data.topTraits.length === 3) {
+            topTraits = data.topTraits.filter((t) => TRAITS.includes(t));
+          }
+
+          // ✅ set explanation UI from model doc
+          setBucketReason(String(data.reason || ""));
+          setBucketUpdatedAt(data.updatedAt?.toDate ? data.updatedAt.toDate() : null);
+
+          const hasAverages =
+            data.bucketTraitAverages &&
+            Object.keys(data.bucketTraitAverages).some(
+              (k) => Number(data.bucketTraitAverages[k] || 0) > 0
+            );
+
+          setBucketConfidence(hasAverages ? "High" : "Low");
+        }
+      } catch (e) {
+        console.error("Failed to load/create trait model:", e);
+        setModelStatus(`Model auto-create failed (likely not admin / rules blocked). Check console.`);
+        topTraits = [];
+      }
+
+      setBucketTopTraits(topTraits);
 
       const myUserSnap = await getDoc(doc(db, "users", user.uid));
       const myUserData = myUserSnap.exists() ? myUserSnap.data() : {};
@@ -270,7 +373,7 @@ export default function ProjectsPage({ user }) {
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((u) => u.id !== user.uid && !existingMembers.includes(u.id) && u.assessmentCompleted)
         .map((u) => {
-          const score = calcCompatibility(myTraits, u.traits || {});
+          const score = calcCompatibilityWeighted(myTraits, u.traits || {}, topTraits);
           return { ...u, compatibility: score, workstyleType: getWorkstyleLabel(score) };
         })
         .sort((a, b) => b.compatibility - a.compatibility)
@@ -350,6 +453,12 @@ export default function ProjectsPage({ user }) {
       const memberUids = Array.isArray(proj.memberUids) ? proj.memberUids : [user.uid];
       const term = computeTermFromDueDate(proj.dueDate);
 
+      // --- rating session meta (quorum + expiry) ---
+      const memberCount = Array.isArray(memberUids) ? memberUids.length : 0;
+      const minSubmissions = Math.max(2, Math.ceil(0.6 * memberCount)); // 60% quorum, min 2
+      const closeAtDate = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days from now
+      const closeAt = Timestamp.fromDate(closeAtDate);
+
       await setDoc(
         doc(db, "projectRatings", projectId),
         {
@@ -357,7 +466,14 @@ export default function ProjectsPage({ user }) {
           projectType: proj.projectType || "",
           term,
           memberUids,
+
+          // session control
           status: "open",
+          memberCount,
+          minSubmissions,
+          closeAt,
+          aggregationRan: false,
+
           endedByUid: user.uid,
           createdAt: serverTimestamp(),
         },
@@ -379,12 +495,18 @@ export default function ProjectsPage({ user }) {
         <div className="tf-project-form">
           <label className="tf-field">
             <span>Project Name (official project name)</span>
-            <input value={form.projectName} onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))} />
+            <input
+              value={form.projectName}
+              onChange={(e) => setForm((p) => ({ ...p, projectName: e.target.value }))}
+            />
           </label>
 
           <label className="tf-field">
             <span>Project Type</span>
-            <select value={form.projectType} onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}>
+            <select
+              value={form.projectType}
+              onChange={(e) => setForm((p) => ({ ...p, projectType: e.target.value }))}
+            >
               {PROJECT_TYPES.map((type) => (
                 <option key={type} value={type}>
                   {type}
@@ -406,7 +528,11 @@ export default function ProjectsPage({ user }) {
 
           <label className="tf-field">
             <span>Due Date</span>
-            <input type="date" value={form.dueDate} onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))} />
+            <input
+              type="date"
+              value={form.dueDate}
+              onChange={(e) => setForm((p) => ({ ...p, dueDate: e.target.value }))}
+            />
           </label>
         </div>
 
@@ -422,6 +548,7 @@ export default function ProjectsPage({ user }) {
         )}
 
         {status && <p className="tf-muted">{status}</p>}
+        {modelStatus && <p className="tf-muted tf-small">{modelStatus}</p>}
       </section>
 
       {pairedMembers.length > 0 && (
@@ -439,14 +566,32 @@ export default function ProjectsPage({ user }) {
               </div>
 
               <div className="tf-inline-actions" style={{ marginTop: 10 }}>
-                <button className="tf-btn tf-btn-primary" onClick={() => sendConnectRequest(m, activeProjectId)} disabled={!activeProjectId}>
+                <button
+                  className="tf-btn tf-btn-primary"
+                  onClick={() => sendConnectRequest(m, activeProjectId)}
+                  disabled={!activeProjectId}
+                >
                   Connect
                 </button>
               </div>
             </article>
           ))}
 
-          {advisor && <div className="tf-advisor-box">{advisor}</div>}
+          {bucketTopTraits.length > 0 && (
+            <div className="tf-advisor-box">
+              <b>Priority traits for this project:</b> {bucketTopTraits.join(", ")}
+              {"\n"}
+              <b>Model confidence:</b> {bucketConfidence}
+              {bucketUpdatedAt ? `  ·  Updated: ${bucketUpdatedAt.toLocaleString()}` : ""}
+              {"\n"}
+              {bucketReason ? `Reason: ${bucketReason}` : ""}
+              {"\n"}
+              {"\n"}
+              {advisor || ""}
+            </div>
+          )}
+
+          {bucketTopTraits.length === 0 && advisor && <div className="tf-advisor-box">{advisor}</div>}
         </section>
       )}
 
@@ -527,7 +672,11 @@ export default function ProjectsPage({ user }) {
                   {(project.memberUids || [])
                     .filter((uid) => uid !== user.uid)
                     .map((uid) => (
-                      <button key={uid} className="tf-btn tf-btn-light" onClick={() => removeTeammate(project.id, uid)}>
+                      <button
+                        key={uid}
+                        className="tf-btn tf-btn-light"
+                        onClick={() => removeTeammate(project.id, uid)}
+                      >
                         Remove teammate {uid.slice(0, 5)}...
                       </button>
                     ))}
@@ -551,7 +700,6 @@ export default function ProjectsPage({ user }) {
                   <div className="tf-muted tf-small">{project.projectType}</div>
                 </div>
 
-                {/* ✅ Edit Ratings only */}
                 <button className="tf-btn tf-btn-primary" onClick={() => navigate(`/rate/${project.id}`)}>
                   Edit Ratings
                 </button>

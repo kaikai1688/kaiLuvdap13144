@@ -207,8 +207,6 @@ If you’ve set up Firebase Hosting:
 
 ```bash
 firebase login
-firebase init hosting
-npm run build
 firebase deploy
 ```
 If Hosting isn’t configured yet in firebase.json, add Firebase Hosting init and redeploy.

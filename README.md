@@ -211,6 +211,10 @@ firebase init hosting
 npm run build
 firebase deploy
 ```
+If Hosting isn’t configured yet in firebase.json, add Firebase Hosting init and redeploy.
+```bash
+firebase init hosting
+```
 
 ## Notes for Judges
 1. This is a serverless MVP: the “backend” is Firebase Auth + Firestore + Rules.

@@ -128,35 +128,42 @@ Key logic (high-level):
 ## ⚙️ Local Setup (Beginner Steps)
 
 ## 1) Install dependencies
+```bash
 npm install
+```
 ## 2) Run the dev server
+```bash
 npm run dev
-
+```
 Vite will show a local URL (usually http://localhost:5173).
 
 ## 3) Build for production
+```bash
 npm run build
+```
+
 ## 4) Preview the production build locally
+```bash
 npm run preview
-Environment Variables (Gemini Prototype)
+```
+---
 
+## Environment Variables (Gemini Prototype)
 Create a .env file in the project root (same folder level as package.json):
-
+```bash
 VITE_GEMINI_API_KEY=your_key_here
-
+```
 If VITE_GEMINI_API_KEY is missing, your app should fall back to a default advisor message (recommended for demos).
 
 ## Firebase Setup (How to run your own copy)
 ## A) Create Firebase project
+1. Go to Firebase Console → Create project
 
-Go to Firebase Console → Create project
+2. Enable Authentication → Google sign-in provider
 
-Enable Authentication → Google sign-in provider
-
-Create Cloud Firestore database
+3. Create Cloud Firestore database
 
 ## B) Add your Firebase config
-
 Update src/firebase.js with your own project settings from:
 Firebase Console → Project settings → Web app
 
@@ -164,76 +171,55 @@ Firebase Console → Project settings → Web app
 Firebase web config is okay to be public, but your Gemini key should be kept in .env.
 
 ## Firestore Security Rules (Summary)
-
 Your rules follow these key ideas:
-
-Default deny for unknown collections:
-
+### Default deny for unknown collections:
 match /{document=**} { allow read, write: if false; }
 
-Signed-in gating: most collections require request.auth != null
-
-Admin role: checked via config/admins.adminMap[uid] == true
-
-Ownership / role-based rules for:
-
-users (owner/admin)
-
-connectionRequests (sender creates, receiver updates)
-
-projectRatings/submissions (only rater can write; project members can read)
-
-Note: projects and chats are currently read/write: if isSignedIn() — good for hackathon speed; tighten to membership-based access for production.
+### A) Signed-in gating: most collections require request.auth != null
+### B) Admin role: checked via config/admins.adminMap[uid] == true
+### C) Ownership / role-based rules for:
+- users (owner/admin)
+- connectionRequests (sender creates, receiver updates)
+- projectRatings/submissions (only rater can write; project members can read)
+*Note: projects and chats are currently read/write: if isSignedIn() — good for hackathon speed; tighten to membership-based access for production.
 
 ## Scripts
-
 From package.json:
-
+```bash
 npm run dev       # start Vite dev server
 npm run build     # build production bundle
 npm run preview   # preview production build locally
 npm run lint      # run ESLint
-Project Structure (Important Files)
+```
 
+## Project Structure (Important Files)
 src/main.jsx — React entry, wraps <App /> with BrowserRouter
-
 src/App.jsx — main routing + auth gate + layout + navigation
-
 src/firebase.js — Firebase initialization (Auth + Firestore)
-
 src/ProfilePage.jsx — user profile + traits
-
 src/ProjectsPage.jsx — browse projects + matching + (prototype) Gemini calls
-
 src/MessagesPage.jsx — chat & messaging (Firestore real-time)
-
 src/RatingPage.jsx — teammate rating submissions
-
 src/adminCompute.js — admin utilities / prototype logic
 
-Deployment (Firebase Hosting)
-
+## Deployment (Firebase Hosting)
 If you’ve set up Firebase Hosting:
 
+```bash
 firebase login
 firebase init hosting
 npm run build
 firebase deploy
-Notes for Judges
+```
 
-This is a serverless MVP: the “backend” is Firebase Auth + Firestore + Rules.
+## Notes for Judges
+1. This is a serverless MVP: the “backend” is Firebase Auth + Firestore + Rules.
+2. Gemini AI is prototype-only (client side) for demo speed and cost control.
+3. Production upgrade path:
+- Move Gemini calls behind Cloud Run / Cloud Functions
+- Tighten Firestore rules for projects/chats/rating membership access
+- Add indexing + query optimization for scale
 
-Gemini AI is prototype-only (client side) for demo speed and cost control.
-
-## Production upgrade path:
-
-Move Gemini calls behind Cloud Run / Cloud Functions
-
-Tighten Firestore rules for projects/chats/rating membership access
-
-Add indexing + query optimization for scale
-
-License
-
+## License
 Hackathon / educational use.
 

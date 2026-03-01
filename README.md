@@ -194,12 +194,19 @@ npm run lint      # run ESLint
 
 ## Project Structure (Important Files)
 src/main.jsx — React entry, wraps <App /> with BrowserRouter
+
 src/App.jsx — main routing + auth gate + layout + navigation
+
 src/firebase.js — Firebase initialization (Auth + Firestore)
+
 src/ProfilePage.jsx — user profile + traits
+
 src/ProjectsPage.jsx — browse projects + matching + (prototype) Gemini calls
+
 src/MessagesPage.jsx — chat & messaging (Firestore real-time)
+
 src/RatingPage.jsx — teammate rating submissions
+
 src/adminCompute.js — admin utilities / prototype logic
 
 ## Deployment (Firebase Hosting)
